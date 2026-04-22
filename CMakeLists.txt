@@ -32,5 +32,15 @@ target_link_libraries(tensor_planner_large_capra_example PRIVATE tensor_planner)
 add_executable(tensor_planner_capra_benchmark examples/capra_benchmark.cpp)
 target_link_libraries(tensor_planner_capra_benchmark PRIVATE tensor_planner)
 
+add_executable(tensor_planner_logistics_benchmark examples/logistics_benchmark.cpp)
+target_link_libraries(tensor_planner_logistics_benchmark PRIVATE tensor_planner)
+
+add_executable(tensor_planner_crafting_benchmark examples/crafting_benchmark.cpp)
+target_link_libraries(tensor_planner_crafting_benchmark PRIVATE tensor_planner)
+
+add_executable(tensor_planner_logistics_smoke tests/logistics_smoke.cpp)
+target_link_libraries(tensor_planner_logistics_smoke PRIVATE tensor_planner)
+
 enable_testing()
 add_test(NAME tensor_planner_solver_smoke COMMAND tensor_planner_solver_smoke)
+add_test(NAME tensor_planner_logistics_smoke COMMAND tensor_planner_logistics_smoke)

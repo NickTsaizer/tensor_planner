@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -433,6 +434,18 @@ void print_summary_row(const char *label, const RunResult &result) {
             << '\n';
 }
 
+void write_csv_row(
+  std::ofstream *stream,
+  int location_count,
+  const char *mode,
+  const RunResult &result
+) {
+  *stream << location_count << ',' << mode << ',' << result.status << ','
+          << (result.solve.solved ? 1 : 0) << ',' << result.time_us << ','
+          << result.solve.plan_length << ',' << result.solve.expansions << ','
+          << result.solve.generated << ',' << result.solve.scorer_calls << '\n';
+}
+
 }  // namespace
 
 int main() {
@@ -445,7 +458,13 @@ int main() {
     .max_plan_length = 128,
   };
 
-  std::cout << "banks,mode,status,solved,time_us,plan_length,expansions,generated,scorer_calls\n";
+  const char *csv_path = "benchmark_results.csv";
+  std::ofstream csv(csv_path, std::ios::trunc);
+  require_true(csv.is_open(), "failed to open benchmark_results.csv");
+
+  const char *header = "banks,mode,status,solved,time_us,plan_length,expansions,generated,scorer_calls\n";
+  std::cout << header;
+  csv << header;
 
   for (const int location_count : {2, 3, 4, 5}) {
     TP_Domain *domain = tp_domain_create(&limits);
@@ -460,6 +479,11 @@ int main() {
     RunResult guided = run_mode(solver, state, TP_SOLVER_MODE_GUIDED_MIXED, true);
     RunResult symbolic = run_mode(solver, state, TP_SOLVER_MODE_SYMBOLIC_ASTAR, false);
     RunResult optimal = run_mode(solver, state, TP_SOLVER_MODE_OPTIMAL_DEBUG, false);
+
+    write_csv_row(&csv, location_count, "greedy", greedy);
+    write_csv_row(&csv, location_count, "guided", guided);
+    write_csv_row(&csv, location_count, "symbolic", symbolic);
+    write_csv_row(&csv, location_count, "optimal", optimal);
 
     std::cout << location_count << ",greedy," << greedy.status << "," << (greedy.solve.solved ? 1 : 0) << ","
               << greedy.time_us << "," << greedy.solve.plan_length << "," << greedy.solve.expansions << ","
@@ -482,6 +506,8 @@ int main() {
     tp_state_destroy(state);
     tp_domain_destroy(domain);
   }
+
+  std::cout << "Wrote benchmark CSV: " << csv_path << '\n';
 
   return 0;
 }
