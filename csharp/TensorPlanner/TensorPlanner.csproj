@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <Nullable>disable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <PackageId>TensorPlanner</PackageId>
+    <Title>Tensor Planner</Title>
+    <Version>0.1.0</Version>
+    <Authors>tensor-planner</Authors>
+    <Description>Unity-compatible C# wrapper for the Tensor Planner native library.</Description>
+    <PackageTags>planning;planner;unity;native;wrapper</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\..\dev.nick.tensor-planner\Runtime\TensorPlanner.cs" Link="TensorPlanner.cs" />
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" Link="README.md" />
+    <None Include="$(TensorPlannerNativeWindowsPath)" Pack="true" PackagePath="runtimes/win-x64/native/" Visible="false" Condition="'$(TensorPlannerNativeWindowsPath)' != '' and Exists('$(TensorPlannerNativeWindowsPath)')" />
+    <None Include="$(TensorPlannerNativeLinuxPath)" Pack="true" PackagePath="runtimes/linux-x64/native/" Visible="false" Condition="'$(TensorPlannerNativeLinuxPath)' != '' and Exists('$(TensorPlannerNativeLinuxPath)')" />
+    <None Include="$(TensorPlannerNativeMacPath)" Pack="true" PackagePath="runtimes/osx-x64/native/" Visible="false" Condition="'$(TensorPlannerNativeMacPath)' != '' and Exists('$(TensorPlannerNativeMacPath)')" />
+    <None Include="$(TensorPlannerNativeMacArm64Path)" Pack="true" PackagePath="runtimes/osx-arm64/native/" Visible="false" Condition="'$(TensorPlannerNativeMacArm64Path)' != '' and Exists('$(TensorPlannerNativeMacArm64Path)')" />
+  </ItemGroup>
+</Project>

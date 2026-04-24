@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\TensorPlanner\TensorPlanner.csproj" />
+    <Content Include="..\..\build\libtensor_planner.so" CopyToOutputDirectory="PreserveNewest" Condition="Exists('..\..\build\libtensor_planner.so')" />
+    <Content Include="..\..\build\tensor_planner.dll" CopyToOutputDirectory="PreserveNewest" Condition="Exists('..\..\build\tensor_planner.dll')" />
+    <Content Include="..\..\build\libtensor_planner.dylib" CopyToOutputDirectory="PreserveNewest" Condition="Exists('..\..\build\libtensor_planner.dylib')" />
+  </ItemGroup>
+</Project>

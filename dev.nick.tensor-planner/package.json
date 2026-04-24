@@ -1,0 +1,23 @@
+{
+  "name": "dev.nick.tensor-planner",
+  "displayName": "Tensor Planner",
+  "version": "0.1.0",
+  "unity": "2019.4",
+  "description": "Unity-compatible C# wrapper for the Tensor Planner native planning library.",
+  "keywords": [
+    "planning",
+    "planner",
+    "native",
+    "p-invoke"
+  ],
+  "author": {
+    "name": "tensor-planner"
+  },
+  "samples": [
+    {
+      "displayName": "Basic Usage",
+      "description": "Minimal runtime example that builds and solves a small planning problem.",
+      "path": "Samples~/Basic Usage"
+    }
+  ]
+}
