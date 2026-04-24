@@ -172,6 +172,12 @@ std::vector<CandidateAction> generate_candidate_actions(
   int32_t max_candidates
 );
 
+int32_t score_candidate_relevance(
+  const TP_Domain &domain,
+  const TP_State &state,
+  const CandidateAction &candidate
+);
+
 bool action_is_applicable(
   const TP_Domain &domain,
   const TP_State &state,

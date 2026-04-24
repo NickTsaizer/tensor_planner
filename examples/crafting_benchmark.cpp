@@ -75,6 +75,7 @@ struct RunResult {
 
 struct CraftingScorerContext {
   std::unordered_map<int32_t, float> item_scores;
+  std::unordered_map<int32_t, float> location_scores;
 };
 
 void require_status(TP_Status status, const char *message) {
@@ -402,6 +403,12 @@ CraftingScorerContext make_context(const ProblemSpec &spec) {
   for (int32_t item : spec.distractor_product_ids) {
     context.item_scores[item] = 2.0f;
   }
+  context.location_scores[spec.home_id] = 16.0f;
+  context.location_scores[spec.forest_id] = 8.0f;
+  context.location_scores[spec.river_id] = 6.0f;
+  context.location_scores[spec.cave_id] = 14.0f;
+  context.location_scores[spec.deep_cave_id] = 32.0f;
+  context.location_scores[spec.ruins_id] = 0.5f;
   return context;
 }
 
@@ -410,21 +417,34 @@ void crafting_scorer(
   const TP_Problem_Tensors *problem,
   void *user_data,
   float *out_action_scores,
-  float *,
+  float *out_state_value,
   bool *out_has_state_value
 ) {
-  *out_has_state_value = false;
   const auto *context = static_cast<const CraftingScorerContext *>(user_data);
+  float state_value = 0.0f;
+  for (int32_t fact_index = 0; fact_index < problem->fact_count; ++fact_index) {
+    if (problem->true_pred_mask[fact_index] == 0 || problem->true_pred_id[fact_index] != PRED_HAS) {
+      continue;
+    }
+    const int32_t item_id = problem->true_pred_arg[fact_index * TP_MAX_ARITY];
+    const auto found = context->item_scores.find(item_id);
+    if (found != context->item_scores.end()) {
+      state_value += found->second;
+    }
+  }
+  *out_state_value = state_value;
+  *out_has_state_value = true;
+
   for (int32_t index = 0; index < problem->candidate_count; ++index) {
     const int16_t *args = &problem->cand_action_arg[index * TP_MAX_PARAMS];
     float score = 0.0f;
     switch (problem->cand_action_schema[index]) {
       case SCHEMA_MOVE_FREE:
-        score = 0.25f;
+      case SCHEMA_MOVE_GATED: {
+        const auto found = context->location_scores.find(args[2]);
+        score = found != context->location_scores.end() ? found->second : 0.25f;
         break;
-      case SCHEMA_MOVE_GATED:
-        score = 1.0f;
-        break;
+      }
       case SCHEMA_GATHER_FREE:
       case SCHEMA_GATHER_TOOL: {
         const auto found = context->item_scores.find(args[1]);
@@ -498,14 +518,28 @@ RunResult run_mode_logged(
 
 }  // namespace
 
-int main() {
+int main(int argc, char **argv) {
   std::ofstream csv("crafting_benchmark_results.csv", std::ios::trunc);
   require_true(csv.is_open(), "failed to open crafting_benchmark_results.csv");
   const char *header = "distractors,mode,status,solved,time_us,plan_length,expansions,generated,scorer_calls\n";
   std::cout << header;
   csv << header;
 
-  for (const int distractor_pairs : {0, 8, 16}) {
+  bool guided_only = false;
+  std::vector<int> benchmark_distractors = {0, 8, 16};
+  if (argc > 1) {
+    benchmark_distractors.clear();
+    for (int arg_index = 1; arg_index < argc; ++arg_index) {
+      const std::string arg = argv[arg_index];
+      if (arg == "--guided-only") {
+        guided_only = true;
+      } else {
+        benchmark_distractors.push_back(std::atoi(arg.c_str()));
+      }
+    }
+  }
+
+  for (const int distractor_pairs : benchmark_distractors) {
     std::cerr << "[crafting-benchmark] building problem distractors=" << distractor_pairs << std::endl;
     ProblemSpec spec = make_problem_spec(distractor_pairs);
     TP_Domain *domain = build_domain(spec);
@@ -513,11 +547,6 @@ int main() {
     TP_Solver *solver = tp_solver_create(domain);
     require_true(solver != nullptr, "tp_solver_create failed");
     CraftingScorerContext context = make_context(spec);
-
-    RunResult greedy = run_mode_logged(solver, state, distractor_pairs, TP_SOLVER_MODE_PURE_GREEDY, nullptr, nullptr);
-    RunResult guided = run_mode_logged(solver, state, distractor_pairs, TP_SOLVER_MODE_GUIDED_MIXED, crafting_scorer, &context);
-    RunResult symbolic = run_mode_logged(solver, state, distractor_pairs, TP_SOLVER_MODE_SYMBOLIC_ASTAR, nullptr, nullptr);
-    RunResult optimal = run_mode_logged(solver, state, distractor_pairs, TP_SOLVER_MODE_OPTIMAL_DEBUG, nullptr, nullptr);
 
     auto emit = [&](const char *mode, const RunResult &result) {
       std::cout << distractor_pairs << ',' << mode << ',' << result.status << ',' << (result.solve.solved ? 1 : 0)
@@ -527,6 +556,20 @@ int main() {
           << ',' << result.time_us << ',' << result.solve.plan_length << ',' << result.solve.expansions << ','
           << result.solve.generated << ',' << result.solve.scorer_calls << '\n';
     };
+
+    RunResult guided = run_mode_logged(solver, state, distractor_pairs, TP_SOLVER_MODE_GUIDED_MIXED, crafting_scorer, &context);
+    if (guided_only) {
+      emit("guided", guided);
+      tp_solve_result_dispose(&guided.solve);
+      tp_solver_destroy(solver);
+      tp_state_destroy(state);
+      tp_domain_destroy(domain);
+      continue;
+    }
+
+    RunResult greedy = run_mode_logged(solver, state, distractor_pairs, TP_SOLVER_MODE_PURE_GREEDY, nullptr, nullptr);
+    RunResult symbolic = run_mode_logged(solver, state, distractor_pairs, TP_SOLVER_MODE_SYMBOLIC_ASTAR, nullptr, nullptr);
+    RunResult optimal = run_mode_logged(solver, state, distractor_pairs, TP_SOLVER_MODE_OPTIMAL_DEBUG, nullptr, nullptr);
 
     emit("greedy", greedy);
     emit("guided", guided);

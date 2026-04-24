@@ -40,7 +40,7 @@ StateIndices build_state_indices_impl(const TP_Domain &domain, const TP_State &s
   return indices;
 }
 
-int32_t score_candidate_relevance(
+int32_t score_candidate_relevance_impl(
   const TP_Domain &domain,
   const TP_State &state,
   const CandidateAction &candidate
@@ -352,6 +352,14 @@ void generate_candidates_from_positive_preconditions(
 
 }  // namespace
 
+int32_t score_candidate_relevance(
+  const TP_Domain &domain,
+  const TP_State &state,
+  const CandidateAction &candidate
+) {
+  return score_candidate_relevance_impl(domain, state, candidate);
+}
+
 const StateIndices &get_or_build_state_indices(const TP_Domain &domain, const TP_State &state, bool *rebuilt) {
   if (rebuilt != nullptr) {
     *rebuilt = false;
@@ -639,7 +647,7 @@ std::vector<CandidateAction> generate_candidate_actions(
     }
 
     for (const CandidateAction &generated : schema_actions) {
-      scored_actions.push_back({generated, score_candidate_relevance(domain, state, generated)});
+      scored_actions.push_back({generated, score_candidate_relevance_impl(domain, state, generated)});
     }
 
     if (static_cast<int32_t>(scored_actions.size()) >= max_candidates * 2) {

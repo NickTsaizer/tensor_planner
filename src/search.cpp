@@ -6,7 +6,15 @@
 namespace {
 
 constexpr float kSymbolicHeuristicWeight = 1.0f;
-constexpr float kActionScoreWeight = 0.05f;
+constexpr float kActionScoreWeight = 0.08f;
+constexpr float kStateValueWeight = 0.02f;
+constexpr int32_t kInitialGuidedGroundingBudget = 256;
+constexpr int32_t kGuidedGroundingTarget = 512;
+constexpr int32_t kGuidedGroundingWidenFactor = 2;
+constexpr std::size_t kSymbolicPrefilterKeep = 192;
+constexpr std::size_t kPreferredKeep = 96;
+constexpr std::size_t kModelKeep = 64;
+constexpr std::size_t kUncertainKeep = 16;
 
 bool mode_uses_scorer(TP_Solver_Mode mode) {
   return mode == TP_SOLVER_MODE_GUIDED_MIXED;
@@ -28,8 +36,9 @@ float compute_priority(
     case TP_SOLVER_MODE_GUIDED_MIXED: {
       float priority = static_cast<float>(g_cost) +
         kSymbolicHeuristicWeight * static_cast<float>(symbolic_h);
-      (void) has_state_value;
-      (void) state_value;
+      if (has_state_value) {
+        priority -= kStateValueWeight * state_value;
+      }
       priority -= kActionScoreWeight * action_score;
       return priority;
     }
@@ -46,7 +55,13 @@ struct SearchNode {
   int32_t g_cost = 0;
   int32_t h_cost = 0;
   float priority = 0.0f;
+  float guidance_score = 0.0f;
   CandidateAction action {};
+};
+
+struct RankedCandidate {
+  CandidateAction action;
+  int32_t score = 0;
 };
 
 struct QueueEntry {
@@ -138,6 +153,137 @@ void score_and_sort_candidates(
   *scorer_sort_time_us += std::chrono::duration_cast<std::chrono::microseconds>(sort_end - sort_start).count();
   *candidates = std::move(sorted);
   tp_problem_tensors_dispose(&tensors);
+}
+
+void shortlist_guided_candidates(
+  const TP_Domain &domain,
+  const TP_State &state,
+  std::vector<CandidateAction> *candidates,
+  std::vector<float> *action_scores
+) {
+  if (candidates->empty()) {
+    return;
+  }
+
+  std::vector<int32_t> preferred_scores;
+  preferred_scores.reserve(candidates->size());
+  for (const CandidateAction &candidate : *candidates) {
+    preferred_scores.push_back(score_candidate_relevance(domain, state, candidate));
+  }
+
+  std::vector<std::size_t> pref_order(candidates->size());
+  for (std::size_t index = 0; index < pref_order.size(); ++index) {
+    pref_order[index] = index;
+  }
+  std::sort(pref_order.begin(), pref_order.end(), [&preferred_scores](std::size_t lhs, std::size_t rhs) {
+    return preferred_scores[lhs] > preferred_scores[rhs];
+  });
+
+  std::vector<std::size_t> model_order(candidates->size());
+  for (std::size_t index = 0; index < model_order.size(); ++index) {
+    model_order[index] = index;
+  }
+  std::sort(model_order.begin(), model_order.end(), [action_scores](std::size_t lhs, std::size_t rhs) {
+    return (*action_scores)[lhs] > (*action_scores)[rhs];
+  });
+
+  std::vector<std::size_t> uncertainty_order(candidates->size());
+  for (std::size_t index = 0; index < uncertainty_order.size(); ++index) {
+    uncertainty_order[index] = index;
+  }
+  std::sort(uncertainty_order.begin(), uncertainty_order.end(), [action_scores](std::size_t lhs, std::size_t rhs) {
+    return std::abs((*action_scores)[lhs]) < std::abs((*action_scores)[rhs]);
+  });
+
+  std::vector<bool> keep(candidates->size(), false);
+  for (std::size_t i = 0; i < std::min(kPreferredKeep, pref_order.size()); ++i) {
+    keep[pref_order[i]] = true;
+  }
+  for (std::size_t i = 0; i < std::min(kModelKeep, model_order.size()); ++i) {
+    keep[model_order[i]] = true;
+  }
+  for (std::size_t i = 0; i < std::min(kUncertainKeep, uncertainty_order.size()); ++i) {
+    keep[uncertainty_order[i]] = true;
+  }
+
+  std::vector<CandidateAction> shortlisted_candidates;
+  std::vector<float> shortlisted_scores;
+  shortlisted_candidates.reserve(candidates->size());
+  shortlisted_scores.reserve(candidates->size());
+  for (std::size_t index = 0; index < candidates->size(); ++index) {
+    if (keep[index]) {
+      shortlisted_candidates.push_back((*candidates)[index]);
+      shortlisted_scores.push_back((*action_scores)[index]);
+    }
+  }
+
+  if (!shortlisted_candidates.empty()) {
+    *candidates = std::move(shortlisted_candidates);
+    *action_scores = std::move(shortlisted_scores);
+  }
+}
+
+void symbolic_prefilter_candidates(
+  const TP_Domain &domain,
+  const TP_State &state,
+  std::vector<CandidateAction> *candidates
+) {
+  if (candidates->size() <= kSymbolicPrefilterKeep) {
+    return;
+  }
+
+  std::vector<RankedCandidate> scored;
+  scored.reserve(candidates->size());
+  for (const CandidateAction &candidate : *candidates) {
+    scored.push_back({candidate, score_candidate_relevance(domain, state, candidate)});
+  }
+
+  std::sort(scored.begin(), scored.end(), [](const RankedCandidate &lhs, const RankedCandidate &rhs) {
+    if (lhs.score != rhs.score) {
+      return lhs.score > rhs.score;
+    }
+    if (lhs.action.schema_id != rhs.action.schema_id) {
+      return lhs.action.schema_id < rhs.action.schema_id;
+    }
+    return lhs.action.args < rhs.action.args;
+  });
+
+  std::vector<CandidateAction> filtered;
+  filtered.reserve(kSymbolicPrefilterKeep);
+  for (std::size_t index = 0; index < std::min(kSymbolicPrefilterKeep, scored.size()); ++index) {
+    filtered.push_back(scored[index].action);
+  }
+  *candidates = std::move(filtered);
+}
+
+std::vector<CandidateAction> generate_guided_candidates_with_widening(
+  const TP_Domain &domain,
+  const TP_State &state,
+  int32_t max_candidates,
+  int32_t *candidate_generation_calls,
+  int64_t *candidate_generation_time_us
+) {
+  int32_t budget = std::min(kInitialGuidedGroundingBudget, max_candidates);
+  const int32_t target = std::min(kGuidedGroundingTarget, max_candidates);
+  std::vector<CandidateAction> candidates;
+  while (true) {
+    const auto candidate_start = std::chrono::steady_clock::now();
+    candidates = generate_candidate_actions(domain, state, budget);
+    const auto candidate_end = std::chrono::steady_clock::now();
+    *candidate_generation_time_us += std::chrono::duration_cast<std::chrono::microseconds>(
+      candidate_end - candidate_start
+    ).count();
+    ++(*candidate_generation_calls);
+
+    const int32_t generated_count = static_cast<int32_t>(candidates.size());
+    symbolic_prefilter_candidates(domain, state, &candidates);
+    if (budget >= max_candidates || generated_count >= target || generated_count < budget) {
+      break;
+    }
+
+    budget = std::min(max_candidates, budget * kGuidedGroundingWidenFactor);
+  }
+  return candidates;
 }
 
 void copy_candidate_action(const CandidateAction &source, TP_Candidate_Action *target) {
@@ -249,17 +395,28 @@ TP_Status solve_priority_search(
       ++index_rebuilds;
     }
 
-    const auto candidate_start = std::chrono::steady_clock::now();
-    std::vector<CandidateAction> candidates = generate_candidate_actions(
-      domain,
-      current.state,
-      domain.limits.max_candidates
-    );
-    const auto candidate_end = std::chrono::steady_clock::now();
-    candidate_generation_time_us += std::chrono::duration_cast<std::chrono::microseconds>(
-      candidate_end - candidate_start
-    ).count();
-    ++candidate_generation_calls;
+    std::vector<CandidateAction> candidates;
+    if (solver->mode == TP_SOLVER_MODE_GUIDED_MIXED) {
+      candidates = generate_guided_candidates_with_widening(
+        domain,
+        current.state,
+        domain.limits.max_candidates,
+        &candidate_generation_calls,
+        &candidate_generation_time_us
+      );
+    } else {
+      const auto candidate_start = std::chrono::steady_clock::now();
+      candidates = generate_candidate_actions(
+        domain,
+        current.state,
+        domain.limits.max_candidates
+      );
+      const auto candidate_end = std::chrono::steady_clock::now();
+      candidate_generation_time_us += std::chrono::duration_cast<std::chrono::microseconds>(
+        candidate_end - candidate_start
+      ).count();
+      ++candidate_generation_calls;
+    }
     float state_value = 0.0f;
     bool has_state_value = false;
     std::vector<float> action_scores;
@@ -276,6 +433,9 @@ TP_Status solve_priority_search(
       &scorer_time_us,
       &scorer_sort_time_us
     );
+    if (solver->mode == TP_SOLVER_MODE_GUIDED_MIXED) {
+      shortlist_guided_candidates(domain, current.state, &candidates, &action_scores);
+    }
     generated += static_cast<int32_t>(candidates.size());
 
     for (std::size_t candidate_index = 0; candidate_index < candidates.size(); ++candidate_index) {
@@ -292,13 +452,14 @@ TP_Status solve_priority_search(
       child.g_cost = current.g_cost + 1;
       child.h_cost = count_unsatisfied_goals(child.state);
       const float action_score = candidate_index < action_scores.size() ? action_scores[candidate_index] : 0.0f;
+      child.guidance_score = current.guidance_score + action_score;
       child.priority = compute_priority(
         solver->mode,
         child.g_cost,
         child.h_cost,
         has_state_value,
         state_value,
-        action_score
+        child.guidance_score
       );
       child.action = candidate;
 
@@ -428,13 +589,14 @@ TP_Status solve_optimal_debug(
       child.g_cost = current.g_cost + 1;
       child.h_cost = count_unsatisfied_goals(child.state);
       const float action_score = candidate_index < action_scores.size() ? action_scores[candidate_index] : 0.0f;
+      child.guidance_score = current.guidance_score + action_score;
       child.priority = compute_priority(
         TP_SOLVER_MODE_OPTIMAL_DEBUG,
         child.g_cost,
         child.h_cost,
         has_state_value,
         state_value,
-        action_score
+        child.guidance_score
       );
       child.action = candidate;
 
