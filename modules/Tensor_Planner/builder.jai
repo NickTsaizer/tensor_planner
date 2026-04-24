@@ -146,13 +146,3 @@ out_result: *TP_Solve_Result
     defer tp_solver_destroy(solver);
     return tp_solver_solve(solver, builder.state, out_result);
 }
-
-builder_solve_optimal_debug :: (
-builder: *Tensor_Planner_Builder,
-out_result: *TP_Solve_Result
-) -> TP_Status {
-    solver := tp_solver_create(builder.domain);
-    assert(solver != null);
-    defer tp_solver_destroy(solver);
-    return tp_solver_solve_optimal_debug(solver, builder.state, out_result);
-}

@@ -24,13 +24,6 @@ typedef enum TP_Status {
   TP_STATUS_NO_SOLUTION = 5
 } TP_Status;
 
-typedef enum TP_Solver_Mode {
-  TP_SOLVER_MODE_PURE_GREEDY = 0,
-  TP_SOLVER_MODE_SYMBOLIC_ASTAR = 1,
-  TP_SOLVER_MODE_GUIDED_MIXED = 2,
-  TP_SOLVER_MODE_OPTIMAL_DEBUG = 3
-} TP_Solver_Mode;
-
 typedef enum TP_Effect_Op {
   TP_EFFECT_ADD = 1,
   TP_EFFECT_DELETE = 2
@@ -331,8 +324,6 @@ void tp_action_graph_dispose(TP_Action_Graph *graph);
 TP_Solver *tp_solver_create(const TP_Domain *domain);
 void tp_solver_destroy(TP_Solver *solver);
 
-TP_Status tp_solver_set_mode(TP_Solver *solver, TP_Solver_Mode mode);
-
 TP_Status tp_solver_set_scorer(
   TP_Solver *solver,
   TP_Score_Candidates_Fn scorer,
@@ -342,12 +333,6 @@ TP_Status tp_solver_set_scorer(
 TP_Status tp_solver_use_tensor_baseline_scorer(TP_Solver *solver);
 
 TP_Status tp_solver_solve(
-  TP_Solver *solver,
-  const TP_State *initial_state,
-  TP_Solve_Result *out_result
-);
-
-TP_Status tp_solver_solve_optimal_debug(
   TP_Solver *solver,
   const TP_State *initial_state,
   TP_Solve_Result *out_result

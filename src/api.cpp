@@ -670,6 +670,10 @@ TP_Status tp_state_generate_candidates(
   out_candidates->actions = static_cast<TP_Candidate_Action *>(
     std::calloc(static_cast<std::size_t>(out_candidates->count), sizeof(TP_Candidate_Action))
   );
+  if (out_candidates->count > 0 && out_candidates->actions == nullptr) {
+    out_candidates->count = 0;
+    return TP_STATUS_LIMIT_EXCEEDED;
+  }
 
   for (int32_t index = 0; index < out_candidates->count; ++index) {
     out_candidates->actions[index].schema_id = generated[static_cast<std::size_t>(index)].schema_id;
@@ -771,15 +775,6 @@ void tp_solver_destroy(TP_Solver *solver) {
     tp_schema_tensors_dispose(&solver->schema_tensors);
   }
   delete solver;
-}
-
-TP_Status tp_solver_set_mode(TP_Solver *solver, TP_Solver_Mode mode) {
-  if (solver == nullptr) {
-    return TP_STATUS_INVALID_ARGUMENT;
-  }
-
-  solver->mode = mode;
-  return TP_STATUS_OK;
 }
 
 TP_Status tp_solver_set_scorer(

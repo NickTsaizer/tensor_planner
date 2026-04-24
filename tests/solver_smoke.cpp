@@ -75,6 +75,20 @@ int main() {
            domain,
            3,
            action_types,
+           nullptr,
+           1,
+           effects,
+           2,
+           numeric_preconditions,
+           1,
+           numeric_effects,
+           1,
+           &move_id
+         ) == TP_STATUS_INVALID_ARGUMENT);
+  assert(tp_domain_add_action_schema(
+           domain,
+           3,
+           action_types,
             preconditions,
             2,
             effects,
@@ -140,7 +154,6 @@ int main() {
   TP_Solver *solver = tp_solver_create(domain);
   assert(solver != nullptr);
   assert(tp_solver_use_tensor_baseline_scorer(solver) == TP_STATUS_OK);
-  assert(tp_solver_set_mode(solver, TP_SOLVER_MODE_GUIDED_MIXED) == TP_STATUS_OK);
 
   TP_Solve_Result result {};
   const TP_Status solve_status = tp_solver_solve(solver, state, &result);
@@ -155,14 +168,6 @@ int main() {
   assert(result.plan_actions[0].schema_id == move_id);
   assert(result.plan_actions[0].args[0] == 0);
   assert(result.plan_actions[0].args[2] == 2);
-
-  TP_Solve_Result optimal_result {};
-  assert(tp_solver_set_mode(solver, TP_SOLVER_MODE_OPTIMAL_DEBUG) == TP_STATUS_OK);
-  const TP_Status optimal_status = tp_solver_solve_optimal_debug(solver, state, &optimal_result);
-  assert(optimal_status == TP_STATUS_OK);
-  assert(optimal_result.solved);
-  assert(optimal_result.plan_length == 1);
-  assert(optimal_result.plan_actions[0].schema_id == move_id);
 
   TP_State *blocked_state = tp_state_create(domain, 5, object_types);
   assert(blocked_state != nullptr);
@@ -180,7 +185,6 @@ int main() {
   tp_solve_result_dispose(&blocked_result);
 
   tp_solve_result_dispose(&result);
-  tp_solve_result_dispose(&optimal_result);
   tp_state_destroy(blocked_state);
   tp_solver_destroy(solver);
   tp_state_destroy(state);

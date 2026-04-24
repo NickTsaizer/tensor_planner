@@ -105,7 +105,6 @@ struct TP_State {
 
 struct TP_Solver {
   const TP_Domain *domain = nullptr;
-  TP_Solver_Mode mode = TP_SOLVER_MODE_PURE_GREEDY;
   TP_Score_Candidates_Fn scorer = nullptr;
   void *scorer_user_data = nullptr;
   TP_Schema_Tensors schema_tensors {};

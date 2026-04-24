@@ -24,13 +24,6 @@ TP_Status :: enum s32 {
     NO_SOLUTION      :: 5;
 }
 
-TP_Solver_Mode :: enum s32 {
-    PURE_GREEDY    :: 0;
-    SYMBOLIC_ASTAR :: 1;
-    GUIDED_MIXED   :: 2;
-    OPTIMAL_DEBUG  :: 3;
-}
-
 TP_Effect_Op :: enum u8 {
     ADD    :: 1;
     DELETE :: 2;
@@ -198,6 +191,22 @@ TP_Problem_Tensors :: struct {
     cand_action_mask:         *u8;
 }
 
+TP_Action_Graph :: struct {
+    object_node_count: s32;
+    fact_node_count:   s32;
+    action_node_count: s32;
+    total_node_count:  s32;
+    edge_count:        s32;
+    node_kind_count:   s32;
+    edge_src_count:    s32;
+    edge_dst_count:    s32;
+    edge_type_count:   s32;
+    node_kind:         *u8;
+    edge_src:          *s32;
+    edge_dst:          *s32;
+    edge_type:         *s32;
+}
+
 TP_Score_Candidates_Fn :: #type (*
 schema: *TP_Schema_Tensors,
 problem: *TP_Problem_Tensors,
@@ -308,15 +317,18 @@ max_candidates: s32,
 out_tensors: *TP_Problem_Tensors
 ) -> TP_Status #foreign tensor_planner_lib;
 
+tp_state_export_action_graph :: (
+domain: *TP_Domain,
+state: *TP_State,
+max_candidates: s32,
+out_graph: *TP_Action_Graph
+) -> TP_Status #foreign tensor_planner_lib;
+
 tp_problem_tensors_dispose :: (tensors: *TP_Problem_Tensors) #foreign tensor_planner_lib;
+tp_action_graph_dispose :: (graph: *TP_Action_Graph) #foreign tensor_planner_lib;
 
 tp_solver_create :: (domain: *TP_Domain) -> *TP_Solver #foreign tensor_planner_lib;
 tp_solver_destroy :: (solver: *TP_Solver) #foreign tensor_planner_lib;
-
-tp_solver_set_mode :: (
-solver: *TP_Solver,
-mode: TP_Solver_Mode
-) -> TP_Status #foreign tensor_planner_lib;
 
 tp_solver_set_scorer :: (
 solver: *TP_Solver,
@@ -329,12 +341,6 @@ solver: *TP_Solver
 ) -> TP_Status #foreign tensor_planner_lib;
 
 tp_solver_solve :: (
-solver: *TP_Solver,
-initial_state: *TP_State,
-out_result: *TP_Solve_Result
-) -> TP_Status #foreign tensor_planner_lib;
-
-tp_solver_solve_optimal_debug :: (
 solver: *TP_Solver,
 initial_state: *TP_State,
 out_result: *TP_Solve_Result

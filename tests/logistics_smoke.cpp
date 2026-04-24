@@ -149,21 +149,19 @@ int main() {
   assert(solver != nullptr);
 
   int32_t goal_location = 4;
-  assert(tp_solver_set_mode(solver, TP_SOLVER_MODE_GUIDED_MIXED) == TP_STATUS_OK);
   assert(tp_solver_set_scorer(solver, logistics_scorer, &goal_location) == TP_STATUS_OK);
   TP_Solve_Result guided {};
   assert(tp_solver_solve(solver, state, &guided) == TP_STATUS_OK);
   assert(guided.solved);
-  assert(guided.plan_length > 0);
-
-  assert(tp_solver_set_mode(solver, TP_SOLVER_MODE_OPTIMAL_DEBUG) == TP_STATUS_OK);
-  TP_Solve_Result optimal {};
-  assert(tp_solver_solve_optimal_debug(solver, state, &optimal) == TP_STATUS_OK);
-  assert(optimal.solved);
-  assert(guided.plan_length == optimal.plan_length);
+  assert(guided.plan_length == 4);
+  assert(guided.plan_actions[0].schema_id == SCHEMA_LOAD);
+  assert(guided.plan_actions[1].schema_id == SCHEMA_DRIVE);
+  assert(guided.plan_actions[2].schema_id == SCHEMA_DRIVE);
+  assert(guided.plan_actions[3].schema_id == SCHEMA_UNLOAD);
+  assert(guided.plan_actions[3].args[2] == goal_location);
+  assert(guided.scorer_calls >= 1);
 
   tp_solve_result_dispose(&guided);
-  tp_solve_result_dispose(&optimal);
   tp_solver_destroy(solver);
   tp_state_destroy(state);
   tp_domain_destroy(domain);

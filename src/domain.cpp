@@ -10,6 +10,10 @@ bool is_valid_predicate_id(const TP_Domain &domain, int32_t predicate_id) {
   return predicate_id >= 0 && predicate_id < static_cast<int32_t>(domain.predicates.size());
 }
 
+bool allocation_failed(int32_t count, const void *pointer) {
+  return count > 0 && pointer == nullptr;
+}
+
 }  // namespace
 
 bool is_valid_limits(const TP_Limits &limits) {
@@ -74,6 +78,13 @@ bool validate_action_schema(
 
   if (precondition_count < 0 || effect_count < 0 || numeric_precondition_count < 0 ||
       numeric_effect_count < 0) {
+    return false;
+  }
+
+  if ((precondition_count > 0 && preconditions == nullptr) ||
+      (effect_count > 0 && effects == nullptr) ||
+      (numeric_precondition_count > 0 && numeric_preconditions == nullptr) ||
+      (numeric_effect_count > 0 && numeric_effects == nullptr)) {
     return false;
   }
 
@@ -261,6 +272,30 @@ TP_Status export_schema_tensors_impl(
   out_tensors->num_eff_op = static_cast<int8_t *>(std::calloc(out_tensors->num_eff_op_count, sizeof(int8_t)));
   out_tensors->num_eff_slot = static_cast<int8_t *>(std::calloc(out_tensors->num_eff_slot_count, sizeof(int8_t)));
   out_tensors->num_eff_value = static_cast<float *>(std::calloc(out_tensors->num_eff_value_count, sizeof(float)));
+
+  if (allocation_failed(out_tensors->pred_arity_count, out_tensors->pred_arity) ||
+      allocation_failed(out_tensors->pred_arg_type_count, out_tensors->pred_arg_type) ||
+      allocation_failed(out_tensors->func_arity_count, out_tensors->func_arity) ||
+      allocation_failed(out_tensors->func_arg_type_count, out_tensors->func_arg_type) ||
+      allocation_failed(out_tensors->action_arity_count, out_tensors->action_arity) ||
+      allocation_failed(out_tensors->action_arg_type_count, out_tensors->action_arg_type) ||
+      allocation_failed(out_tensors->pre_pred_id_count, out_tensors->pre_pred_id) ||
+      allocation_failed(out_tensors->pre_sign_count, out_tensors->pre_sign) ||
+      allocation_failed(out_tensors->pre_slot_count, out_tensors->pre_slot) ||
+      allocation_failed(out_tensors->eff_pred_id_count, out_tensors->eff_pred_id) ||
+      allocation_failed(out_tensors->eff_op_count, out_tensors->eff_op) ||
+      allocation_failed(out_tensors->eff_slot_count, out_tensors->eff_slot) ||
+      allocation_failed(out_tensors->num_pre_func_id_count, out_tensors->num_pre_func_id) ||
+      allocation_failed(out_tensors->num_pre_cmp_count, out_tensors->num_pre_cmp) ||
+      allocation_failed(out_tensors->num_pre_slot_count, out_tensors->num_pre_slot) ||
+      allocation_failed(out_tensors->num_pre_value_count, out_tensors->num_pre_value) ||
+      allocation_failed(out_tensors->num_eff_func_id_count, out_tensors->num_eff_func_id) ||
+      allocation_failed(out_tensors->num_eff_op_count, out_tensors->num_eff_op) ||
+      allocation_failed(out_tensors->num_eff_slot_count, out_tensors->num_eff_slot) ||
+      allocation_failed(out_tensors->num_eff_value_count, out_tensors->num_eff_value)) {
+    tp_schema_tensors_dispose(out_tensors);
+    return TP_STATUS_LIMIT_EXCEEDED;
+  }
 
   for (int32_t predicate_index = 0; predicate_index < predicate_count; ++predicate_index) {
     const PredicateDef &predicate = domain.predicates[static_cast<std::size_t>(predicate_index)];

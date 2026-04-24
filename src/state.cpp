@@ -7,6 +7,10 @@ struct StateIndices {
 
 namespace {
 
+bool allocation_failed(int32_t count, const void *pointer) {
+  return count > 0 && pointer == nullptr;
+}
+
 struct ScoredCandidateAction {
   CandidateAction action;
   int32_t score = 0;
@@ -796,6 +800,23 @@ TP_Status export_problem_tensors_for_candidates_impl(
   out_tensors->cand_action_arg = static_cast<int16_t *>(std::calloc(out_tensors->cand_action_arg_count, sizeof(int16_t)));
   out_tensors->cand_action_mask = static_cast<uint8_t *>(std::calloc(out_tensors->cand_action_mask_count, sizeof(uint8_t)));
 
+  if (allocation_failed(out_tensors->obj_type_count, out_tensors->obj_type) ||
+      allocation_failed(out_tensors->true_pred_id_count, out_tensors->true_pred_id) ||
+      allocation_failed(out_tensors->true_pred_arg_count, out_tensors->true_pred_arg) ||
+      allocation_failed(out_tensors->true_pred_mask_count, out_tensors->true_pred_mask) ||
+      allocation_failed(out_tensors->num_func_id_count, out_tensors->num_func_id) ||
+      allocation_failed(out_tensors->num_func_arg_count, out_tensors->num_func_arg) ||
+      allocation_failed(out_tensors->num_value_count, out_tensors->num_value) ||
+      allocation_failed(out_tensors->goal_pred_id_count, out_tensors->goal_pred_id) ||
+      allocation_failed(out_tensors->goal_pred_arg_count, out_tensors->goal_pred_arg) ||
+      allocation_failed(out_tensors->goal_pred_mask_count, out_tensors->goal_pred_mask) ||
+      allocation_failed(out_tensors->cand_action_schema_count, out_tensors->cand_action_schema) ||
+      allocation_failed(out_tensors->cand_action_arg_count, out_tensors->cand_action_arg) ||
+      allocation_failed(out_tensors->cand_action_mask_count, out_tensors->cand_action_mask)) {
+    tp_problem_tensors_dispose(out_tensors);
+    return TP_STATUS_LIMIT_EXCEEDED;
+  }
+
   for (int32_t object_index = 0; object_index < out_tensors->object_count; ++object_index) {
     out_tensors->obj_type[object_index] = static_cast<int16_t>(state.object_types[static_cast<std::size_t>(object_index)]);
   }
@@ -884,6 +905,14 @@ TP_Status export_action_graph_for_candidates_impl(
   out_graph->edge_src = static_cast<int32_t *>(std::calloc(edge_count, sizeof(int32_t)));
   out_graph->edge_dst = static_cast<int32_t *>(std::calloc(edge_count, sizeof(int32_t)));
   out_graph->edge_type = static_cast<int32_t *>(std::calloc(edge_count, sizeof(int32_t)));
+
+  if (allocation_failed(out_graph->node_kind_count, out_graph->node_kind) ||
+      allocation_failed(out_graph->edge_src_count, out_graph->edge_src) ||
+      allocation_failed(out_graph->edge_dst_count, out_graph->edge_dst) ||
+      allocation_failed(out_graph->edge_type_count, out_graph->edge_type)) {
+    tp_action_graph_dispose(out_graph);
+    return TP_STATUS_LIMIT_EXCEEDED;
+  }
 
   for (int32_t index = 0; index < object_count; ++index) {
     out_graph->node_kind[index] = 0;
