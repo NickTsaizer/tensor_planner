@@ -156,6 +156,7 @@ safe_remove_dir() {
     /|"$SCRIPT_DIR"|"$OUTPUT_ROOT") fail "refusing to remove unsafe path: $1" ;;
   esac
   [ -e "$1" ] && rm -rf -- "$1"
+  return 0
 }
 
 clean_dir() {
@@ -330,7 +331,12 @@ stage_jai() {
   out="$OUTPUT_ROOT/jai/Tensor_Planner"
   clean_dir "$out"
   copy_file "$SCRIPT_DIR/modules/Tensor_Planner/module.jai" "$out/module.jai"
-  copy_file "$SCRIPT_DIR/modules/Tensor_Planner/builder.jai" "$out/builder.jai"
+  copy_file "$SCRIPT_DIR/modules/Tensor_Planner/platform.jai" "$out/platform.jai"
+  copy_file "$SCRIPT_DIR/modules/Tensor_Planner/status.jai" "$out/status.jai"
+  copy_file "$SCRIPT_DIR/modules/Tensor_Planner/schema_spec.jai" "$out/schema_spec.jai"
+  copy_file "$SCRIPT_DIR/modules/Tensor_Planner/runtime.jai" "$out/runtime.jai"
+  copy_file "$SCRIPT_DIR/modules/Tensor_Planner/generate.jai" "$out/generate.jai"
+  copy_dir "$SCRIPT_DIR/modules/Tensor_Planner/generated" "$out/generated"
   for os in $TARGET_OSES; do
     stage_jai_for_os "$os"
   done

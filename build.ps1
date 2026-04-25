@@ -396,7 +396,12 @@ function Stage-Jai {
     $out = Join-Path $script:OutputRoot "jai/Tensor_Planner"
     Clear-Directory $out
     Copy-FileChecked (Join-Path $script:ScriptDir "modules/Tensor_Planner/module.jai") (Join-Path $out "module.jai")
-    Copy-FileChecked (Join-Path $script:ScriptDir "modules/Tensor_Planner/builder.jai") (Join-Path $out "builder.jai")
+    Copy-FileChecked (Join-Path $script:ScriptDir "modules/Tensor_Planner/platform.jai") (Join-Path $out "platform.jai")
+    Copy-FileChecked (Join-Path $script:ScriptDir "modules/Tensor_Planner/status.jai") (Join-Path $out "status.jai")
+    Copy-FileChecked (Join-Path $script:ScriptDir "modules/Tensor_Planner/schema_spec.jai") (Join-Path $out "schema_spec.jai")
+    Copy-FileChecked (Join-Path $script:ScriptDir "modules/Tensor_Planner/runtime.jai") (Join-Path $out "runtime.jai")
+    Copy-FileChecked (Join-Path $script:ScriptDir "modules/Tensor_Planner/generate.jai") (Join-Path $out "generate.jai")
+    Copy-DirectoryChecked (Join-Path $script:ScriptDir "modules/Tensor_Planner/generated") (Join-Path $out "generated")
     foreach ($os in $script:TargetOses) {
         Stage-JaiForOs $os
     }
