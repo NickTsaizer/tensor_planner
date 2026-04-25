@@ -1,102 +1,112 @@
 # Tensor Planner
 
-Tensor Planner is a compact C-compatible C++20 planning library. It exposes a
-typed planning domain, mutable problem states, tensor exports for model scoring,
-and one guided planner that combines domain heuristics with optional external
-candidate scores.
+Tensor Planner is a compact C++20 planning library for games, simulations, and
+tooling. You describe a world as typed objects, facts, actions, and goals; the
+library searches for a valid sequence of actions and returns a plan you can
+execute in your own runtime.
+
+It is designed around a small C ABI, with friendly bindings layered on top:
+
+- **C API** for engine/runtime integrations and language bindings.
+- **C++ fluent API** for strongly typed native projects.
+- **C# / Unity API** for managed gameplay code and Unity packages.
+- **Jai module** with generated C bindings plus a type-first Jai wrapper.
+
+Full documentation lives in `docs/wiki/` and can be copied into the GitHub Wiki once GitHub initializes the wiki git repository:
+
+- [Home](docs/wiki/Home.md)
+- [Getting Started](docs/wiki/Getting-Started.md)
+- [Core Concepts](docs/wiki/Core-Concepts.md)
+- [C API](docs/wiki/C-API.md)
+- [C++ Fluent API](docs/wiki/Cpp-Fluent-API.md)
+- [C# and Unity](docs/wiki/CSharp-and-Unity.md)
+- [Jai Bindings](docs/wiki/Jai-Bindings.md)
+- [Examples](docs/wiki/Examples.md)
+
+## What can you build with it?
+
+Tensor Planner is useful when you want an NPC, tool, or simulation system to
+figure out **how** to reach a goal instead of hard-coding every sequence.
+
+Examples:
+
+- Move a character through connected locations.
+- Solve a Tower of Hanoi puzzle in Unity.
+- Build crafting chains such as `diamond_pickaxe` from recipes and resource
+  locations.
+- Export planning problems as tensor-shaped arrays for model scoring or
+  experimentation.
+- Plug a native planner into C, C++, C#, Unity, Jai, or another language through
+  the C ABI.
 
 ## Features
 
-- C API with opaque `TP_Domain`, `TP_State`, and `TP_Solver` handles.
-- C# fluent wrapper over the C ABI for .NET applications.
-- Typed predicates, numeric functions, action preconditions, and effects.
-- Guided search with bounded candidate grounding, heuristic prefiltering, and
-  scorer-driven candidate ranking.
-- Optional tensor exports for schema, state, candidates, and action graphs.
-- Explicit memory ownership through `tp_*_dispose` and destroy functions.
+- Typed domains: predicates, numeric functions, action parameters, facts, and
+  goals all carry type information.
+- STRIPS-like action schemas with preconditions, add effects, and delete effects.
+- Numeric preconditions and numeric effects in the C layer.
+- Guided search with bounded candidate grounding and deterministic behavior for
+  fixed inputs.
+- Optional scorer callback that receives tensor exports and ranks grounded
+  candidate actions.
+- Tensor exports for schema, problem state, candidates, and action graphs.
+- Explicit memory ownership for native callers.
+- Unity package structure with samples.
+- Distribution script for C++, C#, Unity, and Jai artifacts.
 
-## Build
-
-```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --parallel
-ctest --test-dir build --output-on-failure
-```
-
-The default build creates:
-
-- `tensor_planner` — shared library
-- `tensor_planner_solver_smoke` — core smoke test
-- `tensor_planner_logistics_smoke` — guided logistics smoke test
-- `tensor_planner_crafting_smoke` — guided crafting progression smoke test
-- `tensor_planner_cpp_fluent_smoke` — typed C++ fluent wrapper smoke test
-
-The C# wrapper is Unity-first. Its source lives in
-`dev.nick.tensor-planner/Runtime/TensorPlanner.cs`; the NuGet-style project in
-`csharp/TensorPlanner` links that same file. It can be checked with:
-
-```bash
-dotnet run --project csharp/TensorPlanner.Smoke/TensorPlanner.Smoke.csproj
-```
-
-## Quick Start
-
-### C++ fluent wrapper
-
-Use `tensor_planner.hpp` when you want typed game objects and readable schemas.
-The wrapper keeps raw planner IDs internal and returns your object pointers from
-plan steps.
+## Quick start: C++ movement domain
 
 ```cpp
 #include "tensor_planner.hpp"
 
+#include <string>
+
 struct Character { std::string name; };
 struct Location { std::string name; };
 
-Character player{"player"};
-Location home{"home"};
-Location forest{"forest"};
+int main() {
+  Character player{"player"};
+  Location home{"home"};
+  Location forest{"forest"};
 
-tp::Planner planner;
+  tp::Planner planner;
 
-auto at = planner.predicate<Character, Location>("at");
-auto connected = planner.predicate<Location, Location>("connected");
+  auto at = planner.predicate<Character, Location>("at");
+  auto connected = planner.predicate<Location, Location>("connected");
 
-auto move = planner.action("move")
-  .param<Character>("who")
-  .param<Location>("from")
-  .param<Location>("to")
-  .require(at("who", "from"))
-  .require(connected("from", "to"))
-  .removes(at("who", "from"))
-  .adds(at("who", "to"))
-  .commit();
+  auto move = planner.action("move")
+    .param<Character>("who")
+    .param<Location>("from")
+    .param<Location>("to")
+    .require(at("who", "from"))
+    .require(connected("from", "to"))
+    .removes(at("who", "from"))
+    .adds(at("who", "to"))
+    .commit();
 
-auto state = planner.state()
-  .object(player)
-  .object(home)
-  .object(forest)
-  .fact(at(player, home))
-  .fact(connected(home, forest))
-  .goal(at(player, forest));
+  auto state = planner.state()
+    .object(player)
+    .object(home)
+    .object(forest)
+    .fact(at(player, home))
+    .fact(connected(home, forest))
+    .goal(at(player, forest));
 
-auto result = planner.solve(state);
-for (const auto &step : result.steps()) {
-  if (step.is(move)) {
-    Character *who = step.arg<Character>("who");
-    Location *to = step.arg<Location>("to");
+  auto result = planner.solve(state);
+  for (const tp::PlanStep &step : result.steps()) {
+    if (step.is(move)) {
+      Character *who = step.arg<Character>("who");
+      Location *to = step.arg<Location>("to");
+      // Execute: move who to destination.
+    }
   }
 }
 ```
 
-Objects passed to `.object(...)`, `.fact(...)`, or `.goal(...)` are borrowed;
-they must outlive the solve result if you read object pointers from plan steps.
+The planner returns your real object pointers from plan steps. Objects passed to
+the state are borrowed and must outlive the solve result.
 
-### C# fluent wrapper
-
-Use `dev.nick.tensor-planner` in Unity or `csharp/TensorPlanner` from regular
-.NET applications. The C# API mirrors the C++ fluent wrapper while using C#
-naming conventions and `IDisposable` for the native planner handle.
+## Quick start: C# / Unity
 
 ```csharp
 using TensorPlanner;
@@ -104,152 +114,141 @@ using TensorPlanner;
 sealed class Character { public Character(string name) { Name = name; } public string Name { get; } }
 sealed class Location { public Location(string name) { Name = name; } public string Name { get; } }
 
-var player = new Character("player");
-var home = new Location("home");
-var forest = new Location("forest");
+Character player = new Character("player");
+Location home = new Location("home");
+Location forest = new Location("forest");
 
 using (Planner planner = new Planner()) {
-  Predicate at = planner.Predicate<Character, Location>("at");
-  Predicate connected = planner.Predicate<Location, Location>("connected");
+    Predicate at = planner.Predicate<Character, Location>("at");
+    Predicate connected = planner.Predicate<Location, Location>("connected");
 
-  PlannerAction move = planner.Action("move")
-    .Param<Character>("who")
-    .Param<Location>("from")
-    .Param<Location>("to")
-    .Require(at.Create("who", "from"))
-    .Require(connected.Create("from", "to"))
-    .Removes(at.Create("who", "from"))
-    .Adds(at.Create("who", "to"))
-    .Commit();
+    PlannerAction move = planner.Action("move")
+        .Param<Character>("who")
+        .Param<Location>("from")
+        .Param<Location>("to")
+        .Require(at.Create("who", "from"))
+        .Require(connected.Create("from", "to"))
+        .Removes(at.Create("who", "from"))
+        .Adds(at.Create("who", "to"))
+        .Commit();
 
-  StateBuilder state = planner.State()
-    .Object(player)
-    .Object(home)
-    .Object(forest)
-    .Fact(at.Create(player, home))
-    .Fact(connected.Create(home, forest))
-    .Goal(at.Create(player, forest));
+    StateBuilder state = planner.State()
+        .Object(player)
+        .Object(home)
+        .Object(forest)
+        .Fact(at.Create(player, home))
+        .Fact(connected.Create(home, forest))
+        .Goal(at.Create(player, forest));
 
-  SolveResult result = planner.Solve(state);
-  foreach (PlanStep step in result.Steps) {
-    if (step.Is(move)) {
-      Character who = step.Arg<Character>("who");
-      Location to = step.Arg<Location>("to");
+    SolveResult result = planner.Solve(state);
+    foreach (PlanStep step in result.Steps) {
+        if (step.Is(move)) {
+            Character who = step.Arg<Character>("who");
+            Location to = step.Arg<Location>("to");
+        }
     }
-  }
 }
 ```
 
-Objects passed to `Object(...)`, `Fact(...)`, or `Goal(...)` are held by managed
-reference in the state builder; keep the state/result alive while reading object
-references from plan steps. The wrapper uses plain `DllImport("tensor_planner")`
-for Unity compatibility. In Unity, place native plugins under
-`dev.nick.tensor-planner/Runtime/Plugins` or import a generated package folder.
+Unity samples are included under `dev.nick.tensor-planner/Samples~`:
 
-Unity package staging can be created with:
+- **Basic Usage**: one-step movement example.
+- **Tower of Hanoi**: three-disc puzzle solved as a planning problem.
+
+## Build and test
+
+Requirements:
+
+- CMake 3.20+
+- C++20 compiler
+- .NET SDK for C# wrapper validation
+- Jai compiler for the Jai module/examples
+- `x86_64-w64-mingw32-g++` only when cross-building Windows artifacts on Linux
+
+Build native library and tests:
 
 ```bash
-pwsh ./scripts/New-UnityPackage.ps1 -OutputDirectory ./dist/unity \
-  -LinuxLibrary ./build/libtensor_planner.so
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
 ```
 
-NuGet packages can include native runtime assets with:
+Run the C# smoke test:
 
 ```bash
-pwsh ./scripts/New-NuGetPackage.ps1 -OutputDirectory ./dist/nuget \
-  -LinuxLibrary ./build/libtensor_planner.so
+dotnet run --project csharp/TensorPlanner.Smoke/TensorPlanner.Smoke.csproj -c Release
 ```
 
-### C API
+Build distribution artifacts:
 
-```cpp
-#include "tensor_planner.h"
-
-TP_Limits limits {
-  .max_objects = 32,
-  .max_facts = 128,
-  .max_goals = 16,
-  .max_candidates = 512,
-  .max_expansions = 4096,
-  .max_plan_length = 64,
-};
-
-TP_Domain *domain = tp_domain_create(&limits);
-// Add predicates, functions, and action schemas.
-
-TP_State *state = tp_state_create(domain, object_count, object_types);
-// Add initial facts, numeric values, and goals.
-
-TP_Solver *solver = tp_solver_create(domain);
-tp_solver_use_tensor_baseline_scorer(solver); // Optional.
-
-TP_Solve_Result result {};
-TP_Status status = tp_solver_solve(solver, state, &result);
-
-if (status == TP_STATUS_OK && result.solved) {
-  for (int32_t i = 0; i < result.plan_length; ++i) {
-    const TP_Candidate_Action action = result.plan_actions[i];
-    // Execute or inspect action.
-  }
-}
-
-tp_solve_result_dispose(&result);
-tp_solver_destroy(solver);
-tp_state_destroy(state);
-tp_domain_destroy(domain);
+```bash
+sh ./build.sh -release -target unity cpp sharp jai -o ./dist
 ```
 
-## Guided Scoring
+Useful variants:
 
-The planner always runs the guided search path. A scorer is optional:
-
-- Without a scorer, the planner uses the built-in domain heuristic and candidate
-  prefiltering.
-- `tp_solver_use_tensor_baseline_scorer` installs a small built-in demo scorer
-  intended for examples with location-style goals. For production domains,
-  prefer an application-provided scorer.
-- `tp_solver_set_scorer` installs an application-provided callback.
-
-Custom scorers receive schema tensors, problem tensors, and the grounded
-candidate list. They write one score per candidate and may also return a state
-value. Higher candidate scores make actions more preferred by the guided queue.
-The tensor pointers are borrowed and valid only for the duration of the callback.
-`out_action_scores` has `problem->candidate_count` entries and each entry should
-be initialized by the callback. `schema` may be null if schema export failed
-during solver creation, so callbacks should tolerate a null schema pointer.
-
-```cpp
-void score_candidates(
-  const TP_Schema_Tensors *schema,
-  const TP_Problem_Tensors *problem,
-  void *user_data,
-  float *out_action_scores,
-  float *out_state_value,
-  bool *out_has_state_value
-) {
-  *out_has_state_value = false;
-  for (int32_t i = 0; i < problem->candidate_count; ++i) {
-    out_action_scores[i] = 0.0f;
-  }
-}
+```bash
+sh ./build.sh -target unity cpp -os linux windows -o ./dist
+sh ./build.sh -debug -target cpp sharp -o ./dist -no-clean
 ```
 
-## Memory Ownership
+## Repository layout
 
-Callers own objects returned through API output structs:
+```text
+include/                    C API and C++ fluent wrapper headers
+src/                        Native planner implementation
+tests/                      Native C++ smoke tests and examples
+csharp/TensorPlanner/       .NET project linking the Unity-first C# wrapper
+csharp/TensorPlanner.Smoke/ C# smoke test
+dev.nick.tensor-planner/    Unity package source and samples
+modules/Tensor_Planner/     Jai generated binding workflow and wrapper
+build.sh                    POSIX distribution build script
+```
+
+## Binding overview
+
+| Binding | Best for | Entry point |
+|---------|----------|-------------|
+| C API | Engines, tools, other language bindings | `include/tensor_planner.h` |
+| C++ fluent API | Typed C++ gameplay/simulation code | `include/tensor_planner.hpp` |
+| C# / Unity | Unity gameplay code and .NET tools | `dev.nick.tensor-planner/Runtime/TensorPlanner.cs` |
+| Jai | Jai modules and compile-time typed domains | `modules/Tensor_Planner/module.jai` |
+
+## How it works, briefly
+
+1. Define a domain: object types, predicates/functions, and action schemas.
+2. Build a state: real objects, true facts, numeric values, and goals.
+3. The planner grounds candidate actions from available objects and action
+   schemas, filters impossible actions, then searches for a sequence that makes
+   all goals true.
+4. Optional scorer callbacks can rank candidates using exported tensors.
+5. The result contains ordered plan steps and action arguments.
+
+Read the full explanation in
+[How the Planner Works](docs/wiki/How-the-Planner-Works.md).
+
+## Memory ownership
+
+Native API callers must dispose output structs and destroy handles explicitly:
 
 - `tp_schema_tensors_dispose`
 - `tp_problem_tensors_dispose`
 - `tp_action_graph_dispose`
 - `tp_candidate_action_list_dispose`
 - `tp_solve_result_dispose`
+- `tp_solver_destroy`
+- `tp_state_destroy`
+- `tp_domain_destroy`
 
-Domains, states, and solvers are destroyed with their matching destroy function.
+The C++ and C# wrappers manage native handles, but object references in plan
+steps still point back to application objects. Keep those objects and the state
+alive while reading results.
 
-## Notes and Limitations
+## Notes and limitations
 
-- This package intentionally exposes only the guided planner. Earlier debug and
-  comparison planner variants were removed to keep the library surface focused.
-- Candidate grounding is bounded by `TP_Limits::max_candidates`; increase limits
-  for wider branching domains.
 - Search is deterministic for a fixed domain, state, limits, and scorer output.
+- Candidate grounding is bounded by `TP_Limits::max_candidates`.
+- Action arity and predicate arity are bounded by `TP_MAX_PARAMS` and
+  `TP_MAX_ARITY` in the C API.
+- The public package intentionally exposes the guided planner path only.
+- No license file is currently included in this repository.
