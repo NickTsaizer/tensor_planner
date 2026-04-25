@@ -47,6 +47,24 @@ using (Planner planner = new Planner(new Limits(8, 16, 4, 32, 128, 8)))
     Assert(object.ReferenceEquals(reverseStep.Arg<Character>("who"), player), "reverse who arg");
     Assert(object.ReferenceEquals(reverseStep.Arg<Location>("from"), forest), "reverse from arg");
     Assert(object.ReferenceEquals(reverseStep.Arg<Location>("to"), cave), "reverse to arg");
+
+    SolveResult asyncResult = await planner.SolveAsync(state);
+    Assert(asyncResult.Status == Status.Ok, "async solve status");
+    Assert(asyncResult.Solved, "async solved");
+    Assert(asyncResult.Steps.Count == 2, "async two steps");
+
+    using CancellationTokenSource canceledSource = new CancellationTokenSource();
+    canceledSource.Cancel();
+    bool canceled = false;
+    try
+    {
+        await planner.SolveAsync(state, canceledSource.Token);
+    }
+    catch (OperationCanceledException)
+    {
+        canceled = true;
+    }
+    Assert(canceled, "pre-canceled async solve");
 }
 
 void Assert(bool condition, string message)

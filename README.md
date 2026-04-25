@@ -150,6 +150,16 @@ using (Planner planner = new Planner()) {
 }
 ```
 
+For background solves in .NET or Unity tools, use the async wrapper:
+
+```csharp
+SolveResult result = await planner.SolveAsync(state, cancellationToken);
+```
+
+Cancellation is cooperative around the native solve call; it can cancel before
+the solve starts or after it returns, but it cannot interrupt the current native
+`tp_solver_solve` call mid-execution.
+
 Unity samples are included under `dev.nick.tensor-planner/Samples~`:
 
 - **Basic Usage**: one-step movement example.

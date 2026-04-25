@@ -4,6 +4,8 @@ using System.Collections.ObjectModel;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Win32.SafeHandles;
 
 namespace TensorPlanner
@@ -461,8 +463,10 @@ namespace TensorPlanner
     public sealed class Planner : IDisposable
     {
         private readonly Native.DomainHandle _domain;
+        private readonly object _operationLock = new object();
         private readonly Dictionary<Type, PlannerType> _types = new Dictionary<Type, PlannerType>();
         private readonly Dictionary<int, PlannerAction> _actions = new Dictionary<int, PlannerAction>();
+        private bool _operationInProgress;
         private bool _disposed;
 
         public Planner() : this(new Limits()) { }
@@ -479,10 +483,18 @@ namespace TensorPlanner
 
         public void Dispose()
         {
-            if (!_disposed)
+            lock (_operationLock)
             {
-                _domain.Dispose();
-                _disposed = true;
+                if (_operationInProgress)
+                {
+                    throw new InvalidOperationException("Cannot dispose Planner while a solve operation is in progress.");
+                }
+
+                if (!_disposed)
+                {
+                    _domain.Dispose();
+                    _disposed = true;
+                }
             }
         }
 
@@ -528,12 +540,59 @@ namespace TensorPlanner
 
         public SolveResult Solve(StateBuilder state)
         {
-            ThrowIfDisposed();
             if (state == null)
             {
                 throw new ArgumentNullException("state");
             }
 
+            EnterSolveOperation();
+            try
+            {
+                return SolveCore(state);
+            }
+            finally
+            {
+                ExitSolveOperation();
+            }
+        }
+
+        public Task<SolveResult> SolveAsync(StateBuilder state)
+        {
+            return SolveAsync(state, CancellationToken.None);
+        }
+
+        public Task<SolveResult> SolveAsync(StateBuilder state, CancellationToken cancellationToken)
+        {
+            if (state == null)
+            {
+                throw new ArgumentNullException("state");
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            EnterSolveOperation();
+            return SolveAsyncCore(state, cancellationToken);
+        }
+
+        private async Task<SolveResult> SolveAsyncCore(StateBuilder state, CancellationToken cancellationToken)
+        {
+            try
+            {
+                return await Task.Run(() =>
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    SolveResult result = SolveCore(state);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    return result;
+                }, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                ExitSolveOperation();
+            }
+        }
+
+        private SolveResult SolveCore(StateBuilder state)
+        {
             Native.StateHandle nativeState = Native.tp_state_create(_domain, state.NativeObjectTypes.Count, state.NativeObjectTypes.ToArray());
             if (nativeState.IsInvalid)
             {
@@ -575,6 +634,28 @@ namespace TensorPlanner
                     solver.Dispose();
                 }
                 nativeState.Dispose();
+            }
+        }
+
+        private void EnterSolveOperation()
+        {
+            lock (_operationLock)
+            {
+                ThrowIfDisposed();
+                if (_operationInProgress)
+                {
+                    throw new InvalidOperationException("Planner already has a solve operation in progress.");
+                }
+
+                _operationInProgress = true;
+            }
+        }
+
+        private void ExitSolveOperation()
+        {
+            lock (_operationLock)
+            {
+                _operationInProgress = false;
             }
         }
 
