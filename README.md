@@ -179,7 +179,31 @@ Requirements:
 - Jai compiler for the Jai module and runnable snippets
 - `x86_64-w64-mingw32-g++` only when cross-building Windows artifacts on Linux
 
-Build native library and tests:
+Build distribution artifacts:
+
+```bash
+sh ./build.sh -release -target unity cpp sharp jai -o ./dist
+```
+
+On Windows, use the PowerShell equivalent:
+
+```powershell
+pwsh ./build.ps1 -release -os windows -target unity cpp sharp jai -o ./dist
+```
+
+Useful variants:
+
+```bash
+sh ./build.sh -target unity cpp -os linux windows -o ./dist
+sh ./build.sh -debug -target cpp sharp -o ./dist -no-clean
+```
+
+```powershell
+pwsh ./build.ps1 -target unity cpp -os windows -o ./dist
+pwsh ./build.ps1 -debug -target cpp sharp -o ./dist -no-clean
+```
+
+Build native library and tests manually:
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -193,19 +217,6 @@ Run the C# smoke test:
 dotnet run --project csharp/TensorPlanner.Smoke/TensorPlanner.Smoke.csproj -c Release
 ```
 
-Build distribution artifacts:
-
-```bash
-sh ./build.sh -release -target unity cpp sharp jai -o ./dist
-```
-
-Useful variants:
-
-```bash
-sh ./build.sh -target unity cpp -os linux windows -o ./dist
-sh ./build.sh -debug -target cpp sharp -o ./dist -no-clean
-```
-
 ## Repository layout
 
 ```text
@@ -217,6 +228,7 @@ csharp/TensorPlanner.Smoke/ C# smoke test
 dev.nick.tensor-planner/    Unity package source and runnable scripts
 modules/Tensor_Planner/     Jai generated binding workflow and wrapper
 build.sh                    POSIX distribution build script
+build.ps1                   PowerShell distribution build script for Windows
 ```
 
 ## Binding overview
