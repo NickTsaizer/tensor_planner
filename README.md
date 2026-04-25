@@ -12,16 +12,16 @@ It is designed around a small C ABI, with friendly bindings layered on top:
 - **C# / Unity API** for managed gameplay code and Unity packages.
 - **Jai module** with generated C bindings plus a type-first Jai wrapper.
 
-Full documentation lives in `docs/wiki/` and can be copied into the GitHub Wiki once GitHub initializes the wiki git repository:
+Full documentation lives in the GitHub Wiki:
 
-- [Home](docs/wiki/Home.md)
-- [Getting Started](docs/wiki/Getting-Started.md)
-- [Core Concepts](docs/wiki/Core-Concepts.md)
-- [C API](docs/wiki/C-API.md)
-- [C++ Fluent API](docs/wiki/Cpp-Fluent-API.md)
-- [C# and Unity](docs/wiki/CSharp-and-Unity.md)
-- [Jai Bindings](docs/wiki/Jai-Bindings.md)
-- [Examples](docs/wiki/Examples.md)
+- [Home](https://github.com/NickTsaizer/tensor_planner/wiki)
+- [Getting Started](https://github.com/NickTsaizer/tensor_planner/wiki/Getting-Started)
+- [Core Concepts](https://github.com/NickTsaizer/tensor_planner/wiki/Core-Concepts)
+- [C API](https://github.com/NickTsaizer/tensor_planner/wiki/C-API)
+- [C++ Fluent API](https://github.com/NickTsaizer/tensor_planner/wiki/Cpp-Fluent-API)
+- [C# and Unity](https://github.com/NickTsaizer/tensor_planner/wiki/CSharp-and-Unity)
+- [Jai Bindings](https://github.com/NickTsaizer/tensor_planner/wiki/Jai-Bindings)
+- [Examples](https://github.com/NickTsaizer/tensor_planner/wiki/Examples)
 
 ## What can you build with it?
 
@@ -225,7 +225,7 @@ build.sh                    POSIX distribution build script
 5. The result contains ordered plan steps and action arguments.
 
 Read the full explanation in
-[How the Planner Works](docs/wiki/How-the-Planner-Works.md).
+[How the Planner Works](https://github.com/NickTsaizer/tensor_planner/wiki/How-the-Planner-Works).
 
 ## Memory ownership
 
