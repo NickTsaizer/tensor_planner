@@ -13,19 +13,19 @@ using (Planner planner = new Planner(new Limits(8, 16, 4, 32, 128, 8)))
         .Param<Character>("who")
         .Param<Location>("from")
         .Param<Location>("to")
-        .Require(at.Call("who", "from"))
-        .Require(connected.Call("from", "to"))
-        .Removes(at.Call("who", "from"))
-        .Adds(at.Call("who", "to"))
+        .Require(at.Create("who", "from"))
+        .Require(connected.Create("from", "to"))
+        .Removes(at.Create("who", "from"))
+        .Adds(at.Create("who", "to"))
         .Commit();
 
     StateBuilder state = planner.State()
         .Object(player)
         .Object(home)
         .Object(forest)
-        .Fact(at.Call(player, home))
-        .Fact(connected.Call(home, forest))
-        .Goal(at.Call(player, forest));
+        .Fact(at.Create(player, home))
+        .Fact(connected.Create(home, forest))
+        .Goal(at.Create(player, forest));
 
     SolveResult result = planner.Solve(state);
     Assert(result.Status == Status.Ok, "solve status");

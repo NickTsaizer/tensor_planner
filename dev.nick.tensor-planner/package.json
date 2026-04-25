@@ -18,6 +18,11 @@
       "displayName": "Basic Usage",
       "description": "Minimal runtime example that builds and solves a small planning problem.",
       "path": "Samples~/Basic Usage"
+    },
+    {
+      "displayName": "Tower of Hanoi",
+      "description": "Planning example that solves a three-disc Tower of Hanoi puzzle.",
+      "path": "Samples~/Tower of Hanoi"
     }
   ]
 }

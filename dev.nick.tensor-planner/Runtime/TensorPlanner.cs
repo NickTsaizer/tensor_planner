@@ -93,7 +93,7 @@ namespace TensorPlanner
         public string Name { get; private set; }
         public IReadOnlyList<Type> ArgumentTypes { get { return _argumentTypes; } }
 
-        public Atom Call(params string[] parameterNames)
+        public Atom Create(params string[] parameterNames)
         {
             ValidateArity(parameterNames.Length);
             ArgumentRef[] args = new ArgumentRef[parameterNames.Length];
@@ -104,7 +104,7 @@ namespace TensorPlanner
             return new Atom(Id, Name, _argumentTypes, args);
         }
 
-        public Atom Call(params object[] objects)
+        public Atom Create(params object[] objects)
         {
             ValidateArity(objects.Length);
             ArgumentRef[] args = new ArgumentRef[objects.Length];
@@ -122,6 +122,16 @@ namespace TensorPlanner
                 args[index] = ArgumentRef.Object(value, value.GetType());
             }
             return new Atom(Id, Name, _argumentTypes, args);
+        }
+
+        public Atom Call(params string[] parameterNames)
+        {
+            return Create(parameterNames);
+        }
+
+        public Atom Call(params object[] objects)
+        {
+            return Create(objects);
         }
 
         private void ValidateArity(int arity)
