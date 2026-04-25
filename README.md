@@ -89,7 +89,7 @@ int main() {
     .object(home)
     .object(forest)
     .fact(at(player, home))
-    .fact(connected(home, forest))
+    .edge(connected, home, forest)
     .goal(at(player, forest));
 
   auto result = planner.solve(state);
@@ -137,7 +137,7 @@ using (Planner planner = new Planner()) {
         .Object(home)
         .Object(forest)
         .Fact(at.Create(player, home))
-        .Fact(connected.Create(home, forest))
+        .Edge(connected, home, forest)
         .Goal(at.Create(player, forest));
 
     SolveResult result = planner.Solve(state);

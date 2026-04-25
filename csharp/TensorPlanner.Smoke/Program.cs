@@ -3,6 +3,7 @@ using TensorPlanner;
 Character player = new Character("player");
 Location home = new Location("home");
 Location forest = new Location("forest");
+Location cave = new Location("cave");
 
 using (Planner planner = new Planner(new Limits(8, 16, 4, 32, 128, 8)))
 {
@@ -23,14 +24,16 @@ using (Planner planner = new Planner(new Limits(8, 16, 4, 32, 128, 8)))
         .Object(player)
         .Object(home)
         .Object(forest)
+        .Object(cave)
         .Fact(at.Create(player, home))
-        .Fact(connected.Create(home, forest))
-        .Goal(at.Create(player, forest));
+        .Edge(connected, forest, home)
+        .Edge(connected, forest, cave)
+        .Goal(at.Create(player, cave));
 
     SolveResult result = planner.Solve(state);
     Assert(result.Status == Status.Ok, "solve status");
     Assert(result.Solved, "solved");
-    Assert(result.Steps.Count == 1, "one step");
+    Assert(result.Steps.Count == 2, "two steps");
 
     PlanStep step = result.Steps[0];
     Assert(step.Is(move), "move action");
@@ -38,6 +41,12 @@ using (Planner planner = new Planner(new Limits(8, 16, 4, 32, 128, 8)))
     Assert(object.ReferenceEquals(step.Arg<Character>("who"), player), "who arg");
     Assert(object.ReferenceEquals(step.Arg<Location>("from"), home), "from arg");
     Assert(object.ReferenceEquals(step.Arg<Location>("to"), forest), "to arg");
+
+    PlanStep reverseStep = result.Steps[1];
+    Assert(reverseStep.Is(move), "reverse move action");
+    Assert(object.ReferenceEquals(reverseStep.Arg<Character>("who"), player), "reverse who arg");
+    Assert(object.ReferenceEquals(reverseStep.Arg<Location>("from"), forest), "reverse from arg");
+    Assert(object.ReferenceEquals(reverseStep.Arg<Location>("to"), cave), "reverse to arg");
 }
 
 void Assert(bool condition, string message)

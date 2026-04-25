@@ -19,6 +19,7 @@ int main() {
   Character player{"player"};
   Location home{"home"};
   Location forest{"forest"};
+  Location cave{"cave"};
 
   tp::Planner planner(tp::Limits{
     .max_objects = 8,
@@ -46,14 +47,16 @@ int main() {
     .object(player)
     .object(home)
     .object(forest)
+    .object(cave)
     .fact(at(player, home))
-    .fact(connected(home, forest))
-    .goal(at(player, forest));
+    .edge(connected, forest, home)
+    .edge(connected, forest, cave)
+    .goal(at(player, cave));
 
   const tp::SolveResult result = planner.solve(state);
   assert(result.status() == TP_STATUS_OK);
   assert(result.solved());
-  assert(result.steps().size() == 1);
+  assert(result.steps().size() == 2);
 
   const tp::PlanStep &step = result.steps()[0];
   assert(step.is(move));
@@ -61,5 +64,11 @@ int main() {
   assert(step.arg<Character>("who") == &player);
   assert(step.arg<Location>("from") == &home);
   assert(step.arg<Location>("to") == &forest);
+
+  const tp::PlanStep &reverse_step = result.steps()[1];
+  assert(reverse_step.is(move));
+  assert(reverse_step.arg<Character>("who") == &player);
+  assert(reverse_step.arg<Location>("from") == &forest);
+  assert(reverse_step.arg<Location>("to") == &cave);
   return 0;
 }

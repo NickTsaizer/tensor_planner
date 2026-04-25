@@ -247,6 +247,11 @@ public:
     return *this;
   }
 
+  template <typename A, typename B>
+  StateBuilder &edge(const Predicate &predicate, A &a, B &b) {
+    return fact(predicate(a, b)).fact(predicate(b, a));
+  }
+
   StateBuilder &goal(const Atom &atom) {
     goals_.push_back(atom);
     register_atom_objects(atom);

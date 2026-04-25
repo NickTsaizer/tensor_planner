@@ -291,6 +291,11 @@ namespace TensorPlanner
             return this;
         }
 
+        public StateBuilder Edge(Predicate predicate, object a, object b)
+        {
+            return Fact(predicate.Create(a, b)).Fact(predicate.Create(b, a));
+        }
+
         public StateBuilder Goal(Atom atom)
         {
             _goals.Add(atom);

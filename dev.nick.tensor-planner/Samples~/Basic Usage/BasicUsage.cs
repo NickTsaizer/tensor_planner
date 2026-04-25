@@ -41,7 +41,7 @@ public sealed class TensorPlannerBasicUsage : MonoBehaviour
                 .Object(home)
                 .Object(forest)
                 .Fact(at.Create(player, home))
-                .Fact(connected.Create(home, forest))
+                .Edge(connected, home, forest)
                 .Goal(at.Create(player, forest));
 
             SolveResult result = planner.Solve(state);
