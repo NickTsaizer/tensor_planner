@@ -21,23 +21,23 @@ Full documentation lives in the GitHub Wiki:
 - [C++ Fluent API](https://github.com/NickTsaizer/tensor_planner/wiki/Cpp-Fluent-API)
 - [C# and Unity](https://github.com/NickTsaizer/tensor_planner/wiki/CSharp-and-Unity)
 - [Jai Bindings](https://github.com/NickTsaizer/tensor_planner/wiki/Jai-Bindings)
-- [Examples](https://github.com/NickTsaizer/tensor_planner/wiki/Examples)
+- [Planning Patterns](https://github.com/NickTsaizer/tensor_planner/wiki/Planning-Patterns)
 
-## What can you build with it?
+## Why use it?
 
-Tensor Planner is useful when you want an NPC, tool, or simulation system to
-figure out **how** to reach a goal instead of hard-coding every sequence.
+Tensor Planner is useful when the desired outcome is clear, but the valid path
+depends on current world state.
 
-Examples:
+Instead of writing a separate script for every possible sequence, you define:
 
-- Move a character through connected locations.
-- Solve a Tower of Hanoi puzzle in Unity.
-- Build crafting chains such as `diamond_pickaxe` from recipes and resource
-  locations.
-- Export planning problems as tensor-shaped arrays for model scoring or
-  experimentation.
-- Plug a native planner into C, C++, C#, Unity, Jai, or another language through
-  the C ABI.
+- what objects exist,
+- what facts are true now,
+- which actions can change those facts,
+- and what goal facts must become true.
+
+The planner searches the possible action space and returns a valid ordered plan.
+That makes it useful for goal-directed agents, dependency-heavy systems,
+simulation tooling, reachability checks, and model-assisted action ranking.
 
 ## Features
 
@@ -51,10 +51,10 @@ Examples:
   candidate actions.
 - Tensor exports for schema, problem state, candidates, and action graphs.
 - Explicit memory ownership for native callers.
-- Unity package structure with samples.
+- Unity package structure with runnable scripts.
 - Distribution script for C++, C#, Unity, and Jai artifacts.
 
-## Quick start: C++ movement domain
+## Quick start: C++ planning task
 
 ```cpp
 #include "tensor_planner.hpp"
@@ -160,11 +160,6 @@ Cancellation is cooperative around the native solve call; it can cancel before
 the solve starts or after it returns, but it cannot interrupt the current native
 `tp_solver_solve` call mid-execution.
 
-Unity samples are included under `dev.nick.tensor-planner/Samples~`:
-
-- **Basic Usage**: one-step movement example.
-- **Tower of Hanoi**: three-disc puzzle solved as a planning problem.
-
 ## Build and test
 
 Requirements:
@@ -172,7 +167,7 @@ Requirements:
 - CMake 3.20+
 - C++20 compiler
 - .NET SDK for C# wrapper validation
-- Jai compiler for the Jai module/examples
+- Jai compiler for the Jai module and runnable snippets
 - `x86_64-w64-mingw32-g++` only when cross-building Windows artifacts on Linux
 
 Build native library and tests:
@@ -207,10 +202,10 @@ sh ./build.sh -debug -target cpp sharp -o ./dist -no-clean
 ```text
 include/                    C API and C++ fluent wrapper headers
 src/                        Native planner implementation
-tests/                      Native C++ smoke tests and examples
+tests/                      Native C++ smoke tests
 csharp/TensorPlanner/       .NET project linking the Unity-first C# wrapper
 csharp/TensorPlanner.Smoke/ C# smoke test
-dev.nick.tensor-planner/    Unity package source and samples
+dev.nick.tensor-planner/    Unity package source and runnable scripts
 modules/Tensor_Planner/     Jai generated binding workflow and wrapper
 build.sh                    POSIX distribution build script
 ```
