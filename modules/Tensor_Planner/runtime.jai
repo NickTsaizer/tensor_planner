@@ -23,11 +23,19 @@ Runtime_Atom :: struct {
     args: [TP_MAX_ARITY] s32;
 }
 
+Runtime_Value :: struct {
+    function_id: s32;
+    arity: u8;
+    args: [TP_MAX_ARITY] s32;
+    value: float;
+}
+
 State :: struct {
     domain: Planner_Domain;
     objects: [..] Object_Record;
     facts: [..] Runtime_Atom;
     goals: [..] Runtime_Atom;
+    values: [..] Runtime_Value;
 }
 
 Solve_Result :: struct {
@@ -99,6 +107,11 @@ goal :: (state: *State, predicate_name: string, args: ..Object_Ref) {
     array_add(*state.goals, atom);
 }
 
+value :: (state: *State, function_name: string, amount: float, args: ..Object_Ref) {
+    numeric_value := make_runtime_value(state, function_name, amount, args);
+    array_add(*state.values, numeric_value);
+}
+
 edge :: (state: *State, predicate_name: string, a: Object_Ref, b: Object_Ref) {
     fact(state, predicate_name, a, b);
     fact(state, predicate_name, b, a);
@@ -117,6 +130,9 @@ solve :: (planner: *Planner, state: *State) -> Solve_Result {
     }
     for state.goals {
         assert_ok(tp_state_add_goal_fact(raw_state, it.predicate_id, it.arity, it.args.data), "goal");
+    }
+    for state.values {
+        assert_ok(tp_state_set_function_value(raw_state, it.function_id, it.arity, it.args.data, it.value), "value");
     }
 
     result: Solve_Result;
@@ -166,6 +182,7 @@ log_plan :: (result: Solve_Result) {
 
 install_domain :: (planner: *Planner, domain: Planner_Domain) {
     install_predicates(planner, domain);
+    install_functions(planner, domain);
     install_actions(planner, domain);
 }
 
@@ -183,6 +200,20 @@ install_predicates :: (planner: *Planner, domain: Planner_Domain) {
     }
 }
 
+install_functions :: (planner: *Planner, domain: Planner_Domain) {
+    for 0..domain.functions.count - 1 {
+        fun := domain.functions[it];
+        raw: TP_Function_Def;
+        raw.arity = fun.arity;
+        if fun.arity > 0 {
+            for arg_index: 0..fun.arity - 1 raw.arg_types[arg_index] = type_id(domain, fun.arg_types[arg_index]);
+        }
+        id: s32 = -1;
+        assert_ok(tp_domain_add_function(planner.domain, *raw, *id), "install function");
+        assert(id == it);
+    }
+}
+
 install_actions :: (planner: *Planner, domain: Planner_Domain) {
     for 0..domain.actions.count - 1 {
         action_def := domain.actions[it];
@@ -195,6 +226,8 @@ install_actions :: (planner: *Planner, domain: Planner_Domain) {
 
         preconditions := make_literals(domain, action_def, action_def.requires);
         effects := make_effects(domain, action_def);
+        numeric_preconditions := make_numeric_preconditions(domain, action_def);
+        numeric_effects := make_numeric_effects(domain, action_def);
         id: s32 = -1;
         assert_ok(
         tp_domain_add_action_schema(
@@ -205,16 +238,36 @@ install_actions :: (planner: *Planner, domain: Planner_Domain) {
         cast(s32) preconditions.count,
         effects.data,
         cast(s32) effects.count,
-        null,
-        0,
-        null,
-        0,
+        numeric_preconditions.data,
+        cast(s32) numeric_preconditions.count,
+        numeric_effects.data,
+        cast(s32) numeric_effects.count,
         *id
     ),
     "install action"
 );
 assert(id == it);
 }
+}
+
+make_runtime_value :: (state: *State, function_name: string, amount: float, refs: [] Object_Ref) -> Runtime_Value {
+    fun_id := function_id(state.domain, function_name);
+    assert(fun_id >= 0);
+    fun := state.domain.functions[fun_id];
+    assert(refs.count == fun.arity);
+
+    result: Runtime_Value;
+    result.function_id = fun_id;
+    result.arity = fun.arity;
+    result.value = amount;
+    if refs.count > 0 {
+        for 0..refs.count - 1 {
+            record := state.objects[refs[it].id];
+            assert(record.jai_type == fun.arg_types[it]);
+            result.args[it] = refs[it].id;
+        }
+    }
+    return result;
 }
 
 make_runtime_atom :: (state: *State, predicate_name: string, refs: [] Object_Ref) -> Runtime_Atom {
@@ -263,6 +316,43 @@ make_effect :: (domain: Planner_Domain, action_def: Action, atom_def: Atom, op: 
     result.arity = atom_def.arity;
     fill_slots(*result.slots, action_def, atom_def);
     return result;
+}
+
+make_numeric_preconditions :: (domain: Planner_Domain, action_def: Action) -> [..] TP_Numeric_Precondition {
+    result: [..] TP_Numeric_Precondition;
+    for action_def.numeric_requires {
+        raw: TP_Numeric_Precondition;
+        raw.function_id = function_id(domain, it.term.function_name);
+        raw.cmp_op = cast(u8) it.op;
+        raw.arity = it.term.arity;
+        raw.rhs_value = it.value;
+        fill_numeric_slots(*raw.slots, action_def, it.term);
+        array_add(*result, raw);
+    }
+    return result;
+}
+
+make_numeric_effects :: (domain: Planner_Domain, action_def: Action) -> [..] TP_Numeric_Effect {
+    result: [..] TP_Numeric_Effect;
+    for action_def.numeric_effects {
+        raw: TP_Numeric_Effect;
+        raw.function_id = function_id(domain, it.term.function_name);
+        raw.op = cast(u8) it.op;
+        raw.arity = it.term.arity;
+        raw.rhs_value = it.value;
+        fill_numeric_slots(*raw.slots, action_def, it.term);
+        array_add(*result, raw);
+    }
+    return result;
+}
+
+fill_numeric_slots :: (slots: *[TP_MAX_ARITY] s8, action_def: Action, term: Numeric_Term) {
+    if term.arity == 0 return;
+    for 0..term.arity - 1 {
+        index := param_id(action_def, term.arg_names[it]);
+        assert(index >= 0);
+        slots.*[it] = cast(s8) index;
+    }
 }
 
 fill_slots :: (slots: *[TP_MAX_ARITY] s8, action_def: Action, atom_def: Atom) {

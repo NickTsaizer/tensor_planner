@@ -9,6 +9,7 @@ using (Planner planner = new Planner(new Limits(8, 16, 4, 32, 128, 8)))
 {
     Predicate at = planner.Predicate<Character, Location>("at");
     Predicate connected = planner.Predicate<Location, Location>("connected");
+    NumericFunction energy = planner.Function<Character>("energy");
 
     PlannerAction move = planner.Action("move")
         .Param<Character>("who")
@@ -16,8 +17,10 @@ using (Planner planner = new Planner(new Limits(8, 16, 4, 32, 128, 8)))
         .Param<Location>("to")
         .Require(at.Create("who", "from"))
         .Require(connected.Create("from", "to"))
+        .Require(energy.Create("who").GreaterOrEqual(1.0f))
         .Removes(at.Create("who", "from"))
         .Adds(at.Create("who", "to"))
+        .Decreases(energy.Create("who"), 1.0f)
         .Commit();
 
     StateBuilder state = planner.State()
@@ -28,6 +31,7 @@ using (Planner planner = new Planner(new Limits(8, 16, 4, 32, 128, 8)))
         .Fact(at.Create(player, home))
         .Edge(connected, forest, home)
         .Edge(connected, forest, cave)
+        .Value(energy.Create(player), 2.0f)
         .Goal(at.Create(player, cave));
 
     SolveResult result = planner.Solve(state);

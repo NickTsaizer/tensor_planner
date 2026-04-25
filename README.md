@@ -41,10 +41,11 @@ simulation tooling, reachability checks, and model-assisted action ranking.
 
 ## Features
 
-- Typed domains: predicates, numeric functions, action parameters, facts, and
-  goals all carry type information.
+- Typed domains: predicates, numeric functions, action parameters, facts, values,
+  and goals all carry type information.
 - STRIPS-like action schemas with preconditions, add effects, and delete effects.
-- Numeric preconditions and numeric effects in the C layer.
+- Numeric preconditions and numeric effects for resources, costs, counters, and
+  other scalar state.
 - Guided search with bounded candidate grounding and deterministic behavior for
   fixed inputs.
 - Optional scorer callback that receives tensor exports and ranks grounded
@@ -73,6 +74,7 @@ int main() {
 
   auto at = planner.predicate<Character, Location>("at");
   auto connected = planner.predicate<Location, Location>("connected");
+  auto energy = planner.function<Character>("energy");
 
   auto move = planner.action("move")
     .param<Character>("who")
@@ -80,8 +82,10 @@ int main() {
     .param<Location>("to")
     .require(at("who", "from"))
     .require(connected("from", "to"))
+    .require(energy("who") >= 1.0f)
     .removes(at("who", "from"))
     .adds(at("who", "to"))
+    .decreases(energy("who"), 1.0f)
     .commit();
 
   auto state = planner.state()
@@ -90,6 +94,7 @@ int main() {
     .object(forest)
     .fact(at(player, home))
     .edge(connected, home, forest)
+    .value(energy(player), 2.0f)
     .goal(at(player, forest));
 
   auto result = planner.solve(state);
@@ -121,6 +126,7 @@ Location forest = new Location("forest");
 using (Planner planner = new Planner()) {
     Predicate at = planner.Predicate<Character, Location>("at");
     Predicate connected = planner.Predicate<Location, Location>("connected");
+    NumericFunction energy = planner.Function<Character>("energy");
 
     PlannerAction move = planner.Action("move")
         .Param<Character>("who")
@@ -128,8 +134,10 @@ using (Planner planner = new Planner()) {
         .Param<Location>("to")
         .Require(at.Create("who", "from"))
         .Require(connected.Create("from", "to"))
+        .Require(energy.Create("who").GreaterOrEqual(1.0f))
         .Removes(at.Create("who", "from"))
         .Adds(at.Create("who", "to"))
+        .Decreases(energy.Create("who"), 1.0f)
         .Commit();
 
     StateBuilder state = planner.State()
@@ -138,6 +146,7 @@ using (Planner planner = new Planner()) {
         .Object(forest)
         .Fact(at.Create(player, home))
         .Edge(connected, home, forest)
+        .Value(energy.Create(player), 2.0f)
         .Goal(at.Create(player, forest));
 
     SolveResult result = planner.Solve(state);

@@ -85,6 +85,25 @@ struct Atom {
   std::vector<detail::ArgumentRef> args;
 };
 
+struct NumericTerm {
+  int32_t function_id = -1;
+  std::string function_name;
+  std::vector<std::type_index> arg_types;
+  std::vector<detail::ArgumentRef> args;
+};
+
+struct NumericPrecondition {
+  NumericTerm term;
+  TP_Num_Compare_Op op = TP_NUM_CMP_GTE;
+  float value = 0.0f;
+};
+
+struct NumericEffect {
+  NumericTerm term;
+  TP_Num_Effect_Op op = TP_NUM_EFFECT_SET;
+  float value = 0.0f;
+};
+
 class Predicate {
 public:
   Predicate() = default;
@@ -160,6 +179,89 @@ private:
   std::string name_;
   std::vector<std::type_index> arg_types_;
 };
+
+class Function {
+public:
+  Function() = default;
+
+  template <
+    typename... Args,
+    std::enable_if_t<(!std::is_convertible_v<std::decay_t<Args>, std::string_view> && ...), int> = 0
+  >
+  NumericTerm operator()(Args &...args) const {
+    std::vector<detail::ArgumentRef> refs;
+    refs.reserve(sizeof...(Args));
+    (refs.push_back(object_ref(args)), ...);
+    validate_arity(refs.size());
+    validate_object_types(refs);
+    return NumericTerm{id_, name_, arg_types_, std::move(refs)};
+  }
+
+  template <
+    typename... Args,
+    std::enable_if_t<(std::is_convertible_v<std::decay_t<Args>, std::string_view> && ...), int> = 0
+  >
+  NumericTerm operator()(Args &&...args) const {
+    std::vector<detail::ArgumentRef> refs;
+    refs.reserve(sizeof...(Args));
+    (refs.push_back(parameter_ref(std::string_view(args))), ...);
+    validate_arity(refs.size());
+    return NumericTerm{id_, name_, arg_types_, std::move(refs)};
+  }
+
+  int32_t id() const { return id_; }
+  const std::string &name() const { return name_; }
+
+private:
+  friend class Planner;
+
+  Function(int32_t id, std::string name, std::vector<std::type_index> arg_types)
+    : id_(id), name_(std::move(name)), arg_types_(std::move(arg_types)) {}
+
+  static detail::ArgumentRef parameter_ref(std::string_view name) {
+    return detail::ArgumentRef{
+      .kind = detail::ArgumentRef::Kind::Parameter,
+      .parameter_name = std::string(name),
+    };
+  }
+
+  template <typename T>
+  static detail::ArgumentRef object_ref(T &object) {
+    return detail::ArgumentRef{
+      .kind = detail::ArgumentRef::Kind::Object,
+      .object = static_cast<void *>(&object),
+      .cpp_type = std::type_index(typeid(T)),
+    };
+  }
+
+  void validate_arity(std::size_t arity) const {
+    if (arity != arg_types_.size()) {
+      throw Error("wrong arity for function: " + name_);
+    }
+  }
+
+  void validate_object_types(const std::vector<detail::ArgumentRef> &refs) const {
+    for (std::size_t index = 0; index < refs.size(); ++index) {
+      if (refs[index].cpp_type != arg_types_[index]) {
+        throw Error("object type mismatch for function: " + name_);
+      }
+    }
+  }
+
+  int32_t id_ = -1;
+  std::string name_;
+  std::vector<std::type_index> arg_types_;
+};
+
+inline NumericPrecondition compare(NumericTerm term, TP_Num_Compare_Op op, float value) {
+  return NumericPrecondition{std::move(term), op, value};
+}
+
+inline NumericPrecondition operator<(NumericTerm term, float value) { return compare(std::move(term), TP_NUM_CMP_LT, value); }
+inline NumericPrecondition operator<=(NumericTerm term, float value) { return compare(std::move(term), TP_NUM_CMP_LTE, value); }
+inline NumericPrecondition operator==(NumericTerm term, float value) { return compare(std::move(term), TP_NUM_CMP_EQ, value); }
+inline NumericPrecondition operator>=(NumericTerm term, float value) { return compare(std::move(term), TP_NUM_CMP_GTE, value); }
+inline NumericPrecondition operator>(NumericTerm term, float value) { return compare(std::move(term), TP_NUM_CMP_GT, value); }
 
 class PlanStep {
 public:
@@ -258,6 +360,12 @@ public:
     return *this;
   }
 
+  StateBuilder &value(const NumericTerm &term, float value) {
+    values_.push_back(NumericValue{term, value});
+    register_numeric_term_objects(term);
+    return *this;
+  }
+
 private:
   friend class Planner;
 
@@ -265,7 +373,14 @@ private:
 
   int32_t register_object(std::type_index cpp_type, void *object);
   void register_atom_objects(const Atom &atom);
+  void register_numeric_term_objects(const NumericTerm &term);
   std::vector<int32_t> resolve_object_args(const Atom &atom) const;
+  std::vector<int32_t> resolve_object_args(const NumericTerm &term) const;
+
+  struct NumericValue {
+    NumericTerm term;
+    float value = 0.0f;
+  };
 
   const Planner *planner_ = nullptr;
   std::unordered_map<void *, int32_t> object_ids_;
@@ -274,6 +389,7 @@ private:
   std::vector<int32_t> object_types_;
   std::vector<Atom> facts_;
   std::vector<Atom> goals_;
+  std::vector<NumericValue> values_;
 };
 
 class ActionBuilder {
@@ -288,6 +404,11 @@ public:
     return *this;
   }
 
+  ActionBuilder &require(const NumericPrecondition &condition) {
+    numeric_preconditions_.push_back(make_numeric_precondition(condition));
+    return *this;
+  }
+
   ActionBuilder &adds(const Atom &atom) {
     effects_.push_back(make_effect(atom, TP_EFFECT_ADD));
     return *this;
@@ -298,6 +419,21 @@ public:
     return *this;
   }
 
+  ActionBuilder &sets(const NumericTerm &term, float value) {
+    numeric_effects_.push_back(make_numeric_effect(NumericEffect{term, TP_NUM_EFFECT_SET, value}));
+    return *this;
+  }
+
+  ActionBuilder &increases(const NumericTerm &term, float value) {
+    numeric_effects_.push_back(make_numeric_effect(NumericEffect{term, TP_NUM_EFFECT_ADD, value}));
+    return *this;
+  }
+
+  ActionBuilder &decreases(const NumericTerm &term, float value) {
+    numeric_effects_.push_back(make_numeric_effect(NumericEffect{term, TP_NUM_EFFECT_SUBTRACT, value}));
+    return *this;
+  }
+
   Action commit();
 
 private:
@@ -305,7 +441,10 @@ private:
 
   TP_Action_Literal make_literal(const Atom &atom, int8_t sign) const;
   TP_Action_Effect make_effect(const Atom &atom, uint8_t op) const;
+  TP_Numeric_Precondition make_numeric_precondition(const NumericPrecondition &condition) const;
+  TP_Numeric_Effect make_numeric_effect(const NumericEffect &effect) const;
   int8_t resolve_slot(const detail::ArgumentRef &arg, const std::string &predicate_name) const;
+  void validate_numeric_slots(const NumericTerm &term) const;
 
   Planner *planner_ = nullptr;
   std::string name_;
@@ -315,6 +454,8 @@ private:
   std::vector<int32_t> arg_types_;
   std::vector<TP_Action_Literal> preconditions_;
   std::vector<TP_Action_Effect> effects_;
+  std::vector<TP_Numeric_Precondition> numeric_preconditions_;
+  std::vector<TP_Numeric_Effect> numeric_effects_;
 };
 
 class Planner {
@@ -372,6 +513,14 @@ public:
     return predicate_from_vector(name, types, {std::type_index(typeid(Args))...});
   }
 
+  template <typename... Args>
+  Function function(const std::string &name) {
+    std::vector<Type> types;
+    types.reserve(sizeof...(Args));
+    (types.push_back(type<Args>()), ...);
+    return function_from_vector(name, types, {std::type_index(typeid(Args))...});
+  }
+
   ActionBuilder action(const std::string &name) { return ActionBuilder(this, name); }
   StateBuilder state() const { return StateBuilder(this); }
 
@@ -395,6 +544,10 @@ public:
       for (const Atom &goal : state.goals_) {
         const std::vector<int32_t> args = state.resolve_object_args(goal);
         detail::check(tp_state_add_goal_fact(raw_state, goal.predicate_id, static_cast<uint8_t>(args.size()), args.data()), "add goal");
+      }
+      for (const StateBuilder::NumericValue &value : state.values_) {
+        const std::vector<int32_t> args = state.resolve_object_args(value.term);
+        detail::check(tp_state_set_function_value(raw_state, value.term.function_id, static_cast<uint8_t>(args.size()), args.data(), value.value), "set function value");
       }
 
       solver = tp_solver_create(domain_);
@@ -471,6 +624,25 @@ private:
     return Predicate(predicate_id, name, std::move(cpp_types));
   }
 
+  Function function_from_vector(
+    const std::string &name,
+    const std::vector<Type> &types,
+    std::vector<std::type_index> cpp_types
+  ) {
+    if (types.size() > TP_MAX_ARITY) {
+      throw Error("function arity exceeds TP_MAX_ARITY: " + name);
+    }
+
+    TP_Function_Def function {.arity = static_cast<uint8_t>(types.size()), .arg_types = {0, 0, 0, 0}};
+    for (std::size_t index = 0; index < types.size(); ++index) {
+      function.arg_types[index] = types[index].id;
+    }
+
+    int32_t function_id = -1;
+    detail::check(tp_domain_add_function(domain_, &function, &function_id), "add function");
+    return Function(function_id, name, std::move(cpp_types));
+  }
+
   Action commit_action(ActionBuilder &builder) {
     if (builder.arg_types_.empty()) {
       throw Error("action needs at least one parameter: " + builder.name_);
@@ -488,10 +660,10 @@ private:
                     static_cast<int32_t>(builder.preconditions_.size()),
                     builder.effects_.data(),
                     static_cast<int32_t>(builder.effects_.size()),
-                    nullptr,
-                    0,
-                    nullptr,
-                    0,
+                    builder.numeric_preconditions_.data(),
+                    static_cast<int32_t>(builder.numeric_preconditions_.size()),
+                    builder.numeric_effects_.data(),
+                    static_cast<int32_t>(builder.numeric_effects_.size()),
                     &action_id
                   ),
                   "add action schema");
@@ -551,6 +723,15 @@ inline void StateBuilder::register_atom_objects(const Atom &atom) {
   }
 }
 
+inline void StateBuilder::register_numeric_term_objects(const NumericTerm &term) {
+  for (const detail::ArgumentRef &arg : term.args) {
+    if (arg.kind != detail::ArgumentRef::Kind::Object) {
+      throw Error("state function term uses action parameter: " + term.function_name);
+    }
+    register_object(arg.cpp_type, arg.object);
+  }
+}
+
 inline std::vector<int32_t> StateBuilder::resolve_object_args(const Atom &atom) const {
   std::vector<int32_t> args;
   args.reserve(atom.args.size());
@@ -561,6 +742,22 @@ inline std::vector<int32_t> StateBuilder::resolve_object_args(const Atom &atom) 
     const auto found = object_ids_.find(arg.object);
     if (found == object_ids_.end()) {
       throw Error("unknown object in predicate: " + atom.predicate_name);
+    }
+    args.push_back(found->second);
+  }
+  return args;
+}
+
+inline std::vector<int32_t> StateBuilder::resolve_object_args(const NumericTerm &term) const {
+  std::vector<int32_t> args;
+  args.reserve(term.args.size());
+  for (const detail::ArgumentRef &arg : term.args) {
+    if (arg.kind != detail::ArgumentRef::Kind::Object) {
+      throw Error("state function term uses action parameter: " + term.function_name);
+    }
+    const auto found = object_ids_.find(arg.object);
+    if (found == object_ids_.end()) {
+      throw Error("unknown object in function: " + term.function_name);
     }
     args.push_back(found->second);
   }
@@ -615,6 +812,51 @@ inline TP_Action_Effect ActionBuilder::make_effect(const Atom &atom, uint8_t op)
     }
   }
   return effect;
+}
+
+inline TP_Numeric_Precondition ActionBuilder::make_numeric_precondition(const NumericPrecondition &condition) const {
+  validate_numeric_slots(condition.term);
+  TP_Numeric_Precondition result {
+    .function_id = condition.term.function_id,
+    .cmp_op = static_cast<uint8_t>(condition.op),
+    .arity = 0,
+    .slots = {0, 0, 0, 0},
+    .rhs_value = condition.value,
+  };
+  result.arity = static_cast<uint8_t>(condition.term.args.size());
+  for (std::size_t index = 0; index < condition.term.args.size(); ++index) {
+    result.slots[index] = resolve_slot(condition.term.args[index], condition.term.function_name);
+  }
+  return result;
+}
+
+inline TP_Numeric_Effect ActionBuilder::make_numeric_effect(const NumericEffect &effect) const {
+  validate_numeric_slots(effect.term);
+  TP_Numeric_Effect result {
+    .function_id = effect.term.function_id,
+    .op = static_cast<uint8_t>(effect.op),
+    .arity = 0,
+    .slots = {0, 0, 0, 0},
+    .rhs_value = effect.value,
+  };
+  result.arity = static_cast<uint8_t>(effect.term.args.size());
+  for (std::size_t index = 0; index < effect.term.args.size(); ++index) {
+    result.slots[index] = resolve_slot(effect.term.args[index], effect.term.function_name);
+  }
+  return result;
+}
+
+inline void ActionBuilder::validate_numeric_slots(const NumericTerm &term) const {
+  if (term.args.size() > TP_MAX_ARITY) {
+    throw Error("function arity exceeds TP_MAX_ARITY: " + term.function_name);
+  }
+  for (std::size_t index = 0; index < term.args.size(); ++index) {
+    const std::string &param_name = term.args[index].parameter_name;
+    const auto type_found = slot_cpp_types_.find(param_name);
+    if (type_found == slot_cpp_types_.end() || type_found->second != term.arg_types[index]) {
+      throw Error("parameter type mismatch for function: " + term.function_name);
+    }
+  }
 }
 
 inline int8_t ActionBuilder::resolve_slot(const detail::ArgumentRef &arg, const std::string &predicate_name) const {

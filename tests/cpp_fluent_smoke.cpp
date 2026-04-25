@@ -32,6 +32,7 @@ int main() {
 
   auto at = planner.predicate<Character, Location>("at");
   auto connected = planner.predicate<Location, Location>("connected");
+  auto energy = planner.function<Character>("energy");
 
   auto move = planner.action("move")
     .param<Character>("who")
@@ -39,8 +40,10 @@ int main() {
     .param<Location>("to")
     .require(at("who", "from"))
     .require(connected("from", "to"))
+    .require(energy("who") >= 1.0f)
     .removes(at("who", "from"))
     .adds(at("who", "to"))
+    .decreases(energy("who"), 1.0f)
     .commit();
 
   auto state = planner.state()
@@ -51,6 +54,7 @@ int main() {
     .fact(at(player, home))
     .edge(connected, forest, home)
     .edge(connected, forest, cave)
+    .value(energy(player), 2.0f)
     .goal(at(player, cave));
 
   const tp::SolveResult result = planner.solve(state);

@@ -145,6 +145,116 @@ namespace TensorPlanner
         }
     }
 
+    public sealed class NumericFunction
+    {
+        private readonly Type[] _argumentTypes;
+
+        internal NumericFunction(int id, string name, Type[] argumentTypes)
+        {
+            Id = id;
+            Name = name;
+            _argumentTypes = argumentTypes;
+        }
+
+        public int Id { get; private set; }
+        public string Name { get; private set; }
+        public IReadOnlyList<Type> ArgumentTypes { get { return _argumentTypes; } }
+
+        public NumericTerm Create(params string[] parameterNames)
+        {
+            ValidateArity(parameterNames.Length);
+            ArgumentRef[] args = new ArgumentRef[parameterNames.Length];
+            for (int index = 0; index < parameterNames.Length; index++)
+            {
+                args[index] = ArgumentRef.Parameter(parameterNames[index]);
+            }
+            return new NumericTerm(Id, Name, _argumentTypes, args);
+        }
+
+        public NumericTerm Create(params object[] objects)
+        {
+            ValidateArity(objects.Length);
+            ArgumentRef[] args = new ArgumentRef[objects.Length];
+            for (int index = 0; index < objects.Length; index++)
+            {
+                object value = objects[index];
+                if (value == null)
+                {
+                    throw new TensorPlannerException("null object in function: " + Name);
+                }
+                if (value.GetType() != _argumentTypes[index])
+                {
+                    throw new TensorPlannerException("object type mismatch for function: " + Name);
+                }
+                args[index] = ArgumentRef.Object(value, value.GetType());
+            }
+            return new NumericTerm(Id, Name, _argumentTypes, args);
+        }
+
+        private void ValidateArity(int arity)
+        {
+            if (arity != _argumentTypes.Length)
+            {
+                throw new TensorPlannerException("wrong arity for function: " + Name);
+            }
+        }
+    }
+
+    public sealed class NumericTerm
+    {
+        internal NumericTerm(int functionId, string functionName, IReadOnlyList<Type> argumentTypes, IReadOnlyList<ArgumentRef> arguments)
+        {
+            FunctionId = functionId;
+            FunctionName = functionName;
+            ArgumentTypes = argumentTypes;
+            Arguments = arguments;
+        }
+
+        public int FunctionId { get; private set; }
+        public string FunctionName { get; private set; }
+        public IReadOnlyList<Type> ArgumentTypes { get; private set; }
+        public IReadOnlyList<ArgumentRef> Arguments { get; private set; }
+
+        public NumericPrecondition LessThan(float value) { return Compare(1, value); }
+        public NumericPrecondition LessOrEqual(float value) { return Compare(2, value); }
+        public NumericPrecondition EqualTo(float value) { return Compare(3, value); }
+        public NumericPrecondition GreaterOrEqual(float value) { return Compare(4, value); }
+        public NumericPrecondition GreaterThan(float value) { return Compare(5, value); }
+
+        private NumericPrecondition Compare(byte op, float value)
+        {
+            return new NumericPrecondition(this, op, value);
+        }
+    }
+
+    public sealed class NumericPrecondition
+    {
+        internal NumericPrecondition(NumericTerm term, byte op, float value)
+        {
+            Term = term;
+            Op = op;
+            Value = value;
+        }
+
+        internal NumericTerm Term { get; private set; }
+        internal byte Op { get; private set; }
+        internal float Value { get; private set; }
+    }
+
+    internal sealed class NumericEffect
+    {
+        internal NumericEffect(NumericTerm term, byte op, float value)
+        {
+            Term = term;
+            Op = op;
+            Value = value;
+        }
+
+        internal NumericTerm Term { get; private set; }
+        internal byte Op { get; private set; }
+        internal float Value { get; private set; }
+    }
+
     public sealed class Atom
     {
         internal Atom(int predicateId, string predicateName, IReadOnlyList<Type> argumentTypes, IReadOnlyList<ArgumentRef> arguments)
@@ -264,6 +374,7 @@ namespace TensorPlanner
         private readonly List<int> _nativeObjectTypes = new List<int>();
         private readonly List<Atom> _facts = new List<Atom>();
         private readonly List<Atom> _goals = new List<Atom>();
+        private readonly List<NumericValue> _values = new List<NumericValue>();
 
         internal StateBuilder(Planner planner)
         {
@@ -275,6 +386,7 @@ namespace TensorPlanner
         internal IReadOnlyList<int> NativeObjectTypes { get { return _nativeObjectTypes; } }
         internal IReadOnlyList<Atom> Facts { get { return _facts; } }
         internal IReadOnlyList<Atom> Goals { get { return _goals; } }
+        internal IReadOnlyList<NumericValue> Values { get { return _values; } }
 
         public StateBuilder Object<T>(T value) where T : class
         {
@@ -305,6 +417,13 @@ namespace TensorPlanner
             return this;
         }
 
+        public StateBuilder Value(NumericTerm term, float value)
+        {
+            _values.Add(new NumericValue(term, value));
+            RegisterNumericTermObjects(term);
+            return this;
+        }
+
         internal int[] ResolveObjectArgs(Atom atom)
         {
             int[] args = new int[atom.Arguments.Count];
@@ -318,6 +437,24 @@ namespace TensorPlanner
                 if (!_objectIds.TryGetValue(arg.Value, out args[index]))
                 {
                     throw new TensorPlannerException("unknown object in predicate: " + atom.PredicateName);
+                }
+            }
+            return args;
+        }
+
+        internal int[] ResolveObjectArgs(NumericTerm term)
+        {
+            int[] args = new int[term.Arguments.Count];
+            for (int index = 0; index < term.Arguments.Count; index++)
+            {
+                ArgumentRef arg = term.Arguments[index];
+                if (arg.IsParameter || arg.Value == null)
+                {
+                    throw new TensorPlannerException("state function uses action parameter: " + term.FunctionName);
+                }
+                if (!_objectIds.TryGetValue(arg.Value, out args[index]))
+                {
+                    throw new TensorPlannerException("unknown object in function: " + term.FunctionName);
                 }
             }
             return args;
@@ -350,12 +487,39 @@ namespace TensorPlanner
                 RegisterObject(arg.ClrType, arg.Value);
             }
         }
+
+        private void RegisterNumericTermObjects(NumericTerm term)
+        {
+            foreach (ArgumentRef arg in term.Arguments)
+            {
+                if (arg.IsParameter || arg.Value == null)
+                {
+                    throw new TensorPlannerException("state function uses action parameter: " + term.FunctionName);
+                }
+                RegisterObject(arg.ClrType, arg.Value);
+            }
+        }
+
+        internal sealed class NumericValue
+        {
+            internal NumericValue(NumericTerm term, float value)
+            {
+                Term = term;
+                Value = value;
+            }
+
+            internal NumericTerm Term { get; private set; }
+            internal float Value { get; private set; }
+        }
     }
 
     public sealed class ActionBuilder
     {
         private const byte AddEffect = 1;
         private const byte DeleteEffect = 2;
+        private const byte SetNumericEffect = 1;
+        private const byte AddNumericEffect = 2;
+        private const byte SubtractNumericEffect = 3;
 
         private readonly Planner _planner;
         private readonly string _name;
@@ -365,6 +529,8 @@ namespace TensorPlanner
         private readonly List<int> _argumentTypes = new List<int>();
         private readonly List<Native.ActionLiteral> _preconditions = new List<Native.ActionLiteral>();
         private readonly List<Native.ActionEffect> _effects = new List<Native.ActionEffect>();
+        private readonly List<Native.NumericPrecondition> _numericPreconditions = new List<Native.NumericPrecondition>();
+        private readonly List<Native.NumericEffect> _numericEffects = new List<Native.NumericEffect>();
 
         internal ActionBuilder(Planner planner, string name)
         {
@@ -397,6 +563,12 @@ namespace TensorPlanner
             return this;
         }
 
+        public ActionBuilder Require(NumericPrecondition precondition)
+        {
+            _numericPreconditions.Add(MakeNumericPrecondition(precondition));
+            return this;
+        }
+
         public ActionBuilder Adds(Atom atom)
         {
             _effects.Add(MakeEffect(atom, AddEffect));
@@ -409,9 +581,34 @@ namespace TensorPlanner
             return this;
         }
 
+        public ActionBuilder Sets(NumericTerm term, float value)
+        {
+            _numericEffects.Add(MakeNumericEffect(new NumericEffect(term, SetNumericEffect, value)));
+            return this;
+        }
+
+        public ActionBuilder Increases(NumericTerm term, float value)
+        {
+            _numericEffects.Add(MakeNumericEffect(new NumericEffect(term, AddNumericEffect, value)));
+            return this;
+        }
+
+        public ActionBuilder Decreases(NumericTerm term, float value)
+        {
+            _numericEffects.Add(MakeNumericEffect(new NumericEffect(term, SubtractNumericEffect, value)));
+            return this;
+        }
+
         public PlannerAction Commit()
         {
-            return _planner.CommitAction(_name, _parameterNames, _argumentTypes, _preconditions, _effects);
+            return _planner.CommitAction(
+                _name,
+                _parameterNames,
+                _argumentTypes,
+                _preconditions,
+                _effects,
+                _numericPreconditions,
+                _numericEffects);
         }
 
         private Native.ActionLiteral MakeLiteral(Atom atom, sbyte sign)
@@ -434,6 +631,28 @@ namespace TensorPlanner
             return new Native.ActionEffect(atom.PredicateId, op, (byte)atom.Arguments.Count, slots);
         }
 
+        private Native.NumericPrecondition MakeNumericPrecondition(NumericPrecondition precondition)
+        {
+            sbyte[] slots = ResolveSlots(precondition.Term);
+            return new Native.NumericPrecondition(
+                precondition.Term.FunctionId,
+                precondition.Op,
+                (byte)precondition.Term.Arguments.Count,
+                slots,
+                precondition.Value);
+        }
+
+        private Native.NumericEffect MakeNumericEffect(NumericEffect effect)
+        {
+            sbyte[] slots = ResolveSlots(effect.Term);
+            return new Native.NumericEffect(
+                effect.Term.FunctionId,
+                effect.Op,
+                (byte)effect.Term.Arguments.Count,
+                slots,
+                effect.Value);
+        }
+
         private sbyte[] ResolveSlots(Atom atom)
         {
             sbyte[] slots = new sbyte[Native.MaxArity];
@@ -453,6 +672,35 @@ namespace TensorPlanner
                 if (!_slotTypes.TryGetValue(arg.ParameterName, out type) || type != atom.ArgumentTypes[index])
                 {
                     throw new TensorPlannerException("parameter type mismatch for predicate: " + atom.PredicateName);
+                }
+                slots[index] = (sbyte)slot;
+            }
+            return slots;
+        }
+
+        private sbyte[] ResolveSlots(NumericTerm term)
+        {
+            if (term.Arguments.Count > Native.MaxArity)
+            {
+                throw new TensorPlannerException("function arity exceeds TP_MAX_ARITY: " + term.FunctionName);
+            }
+            sbyte[] slots = new sbyte[Native.MaxArity];
+            for (int index = 0; index < term.Arguments.Count; index++)
+            {
+                ArgumentRef arg = term.Arguments[index];
+                if (!arg.IsParameter || arg.ParameterName == null)
+                {
+                    throw new TensorPlannerException("action function uses object reference: " + term.FunctionName);
+                }
+                int slot;
+                if (!_slotIds.TryGetValue(arg.ParameterName, out slot))
+                {
+                    throw new TensorPlannerException("unknown action parameter '" + arg.ParameterName + "' in " + term.FunctionName);
+                }
+                Type type;
+                if (!_slotTypes.TryGetValue(arg.ParameterName, out type) || type != term.ArgumentTypes[index])
+                {
+                    throw new TensorPlannerException("parameter type mismatch for function: " + term.FunctionName);
                 }
                 slots[index] = (sbyte)slot;
             }
@@ -526,6 +774,26 @@ namespace TensorPlanner
         public Predicate Predicate<T1, T2, T3, T4>(string name)
         {
             return PredicateFromTypes(name, typeof(T1), typeof(T2), typeof(T3), typeof(T4));
+        }
+
+        public NumericFunction Function<T1>(string name)
+        {
+            return FunctionFromTypes(name, typeof(T1));
+        }
+
+        public NumericFunction Function<T1, T2>(string name)
+        {
+            return FunctionFromTypes(name, typeof(T1), typeof(T2));
+        }
+
+        public NumericFunction Function<T1, T2, T3>(string name)
+        {
+            return FunctionFromTypes(name, typeof(T1), typeof(T2), typeof(T3));
+        }
+
+        public NumericFunction Function<T1, T2, T3, T4>(string name)
+        {
+            return FunctionFromTypes(name, typeof(T1), typeof(T2), typeof(T3), typeof(T4));
         }
 
         public ActionBuilder Action(string name)
@@ -616,6 +884,12 @@ namespace TensorPlanner
                     Check(Native.tp_state_add_goal_fact(nativeState, goal.PredicateId, (byte)args.Length, args), "add goal");
                 }
 
+                foreach (StateBuilder.NumericValue value in state.Values)
+                {
+                    int[] args = state.ResolveObjectArgs(value.Term);
+                    Check(Native.tp_state_set_function_value(nativeState, value.Term.FunctionId, (byte)args.Length, args, value.Value), "set function value");
+                }
+
                 solver = Native.tp_solver_create(_domain);
                 if (solver.IsInvalid)
                 {
@@ -674,7 +948,9 @@ namespace TensorPlanner
             IReadOnlyList<string> parameterNames,
             IReadOnlyList<int> argumentTypes,
             IReadOnlyList<Native.ActionLiteral> preconditions,
-            IReadOnlyList<Native.ActionEffect> effects)
+            IReadOnlyList<Native.ActionEffect> effects,
+            IReadOnlyList<Native.NumericPrecondition> numericPreconditions,
+            IReadOnlyList<Native.NumericEffect> numericEffects)
         {
             ThrowIfDisposed();
             if (argumentTypes.Count == 0)
@@ -695,10 +971,10 @@ namespace TensorPlanner
                 preconditions.Count,
                 effects.ToArray(),
                 effects.Count,
-                IntPtr.Zero,
-                0,
-                IntPtr.Zero,
-                0,
+                numericPreconditions.ToArray(),
+                numericPreconditions.Count,
+                numericEffects.ToArray(),
+                numericEffects.Count,
                 out actionId), "add action schema");
 
             PlannerAction action = new PlannerAction(actionId, name, new ReadOnlyCollection<string>(parameterNames.ToArray()));
@@ -735,6 +1011,25 @@ namespace TensorPlanner
             int predicateId;
             Check(Native.tp_domain_add_predicate(_domain, ref native, out predicateId), "add predicate");
             return new Predicate(predicateId, name, clrTypes);
+        }
+
+        private NumericFunction FunctionFromTypes(string name, params Type[] clrTypes)
+        {
+            if (clrTypes.Length > Native.MaxArity)
+            {
+                throw new TensorPlannerException("function arity exceeds TP_MAX_ARITY: " + name);
+            }
+
+            int[] argTypes = new int[clrTypes.Length];
+            for (int index = 0; index < clrTypes.Length; index++)
+            {
+                argTypes[index] = TypeFor(clrTypes[index], clrTypes[index].Name).Id;
+            }
+
+            Native.FunctionDef native = new Native.FunctionDef((byte)clrTypes.Length, argTypes);
+            int functionId;
+            Check(Native.tp_domain_add_function(_domain, ref native, out functionId), "add function");
+            return new NumericFunction(functionId, name, clrTypes);
         }
 
         private IReadOnlyList<PlanStep> ReadSteps(Native.SolveResult raw, StateBuilder state)
@@ -845,6 +1140,25 @@ namespace TensorPlanner
         }
 
         [StructLayout(LayoutKind.Sequential)]
+        internal struct FunctionDef
+        {
+            public byte Arity;
+            public int Arg0;
+            public int Arg1;
+            public int Arg2;
+            public int Arg3;
+
+            public FunctionDef(byte arity, int[] args)
+            {
+                Arity = arity;
+                Arg0 = args.Length > 0 ? args[0] : 0;
+                Arg1 = args.Length > 1 ? args[1] : 0;
+                Arg2 = args.Length > 2 ? args[2] : 0;
+                Arg3 = args.Length > 3 ? args[3] : 0;
+            }
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
         internal struct ActionLiteral
         {
             public int PredicateId;
@@ -887,6 +1201,56 @@ namespace TensorPlanner
                 Slot1 = slots.Length > 1 ? slots[1] : (sbyte)0;
                 Slot2 = slots.Length > 2 ? slots[2] : (sbyte)0;
                 Slot3 = slots.Length > 3 ? slots[3] : (sbyte)0;
+            }
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct NumericPrecondition
+        {
+            public int FunctionId;
+            public byte CompareOp;
+            public byte Arity;
+            public sbyte Slot0;
+            public sbyte Slot1;
+            public sbyte Slot2;
+            public sbyte Slot3;
+            public float RhsValue;
+
+            public NumericPrecondition(int functionId, byte compareOp, byte arity, sbyte[] slots, float rhsValue)
+            {
+                FunctionId = functionId;
+                CompareOp = compareOp;
+                Arity = arity;
+                Slot0 = slots.Length > 0 ? slots[0] : (sbyte)0;
+                Slot1 = slots.Length > 1 ? slots[1] : (sbyte)0;
+                Slot2 = slots.Length > 2 ? slots[2] : (sbyte)0;
+                Slot3 = slots.Length > 3 ? slots[3] : (sbyte)0;
+                RhsValue = rhsValue;
+            }
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct NumericEffect
+        {
+            public int FunctionId;
+            public byte Op;
+            public byte Arity;
+            public sbyte Slot0;
+            public sbyte Slot1;
+            public sbyte Slot2;
+            public sbyte Slot3;
+            public float RhsValue;
+
+            public NumericEffect(int functionId, byte op, byte arity, sbyte[] slots, float rhsValue)
+            {
+                FunctionId = functionId;
+                Op = op;
+                Arity = arity;
+                Slot0 = slots.Length > 0 ? slots[0] : (sbyte)0;
+                Slot1 = slots.Length > 1 ? slots[1] : (sbyte)0;
+                Slot2 = slots.Length > 2 ? slots[2] : (sbyte)0;
+                Slot3 = slots.Length > 3 ? slots[3] : (sbyte)0;
+                RhsValue = rhsValue;
             }
         }
 
@@ -978,6 +1342,9 @@ namespace TensorPlanner
         internal static extern Status tp_domain_add_predicate(DomainHandle domain, ref PredicateDef predicateDef, out int predicateIdOut);
 
         [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern Status tp_domain_add_function(DomainHandle domain, ref FunctionDef functionDef, out int functionIdOut);
+
+        [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
         internal static extern Status tp_domain_add_action_schema(
             DomainHandle domain,
             byte arity,
@@ -986,9 +1353,9 @@ namespace TensorPlanner
             int preconditionCount,
             ActionEffect[] effects,
             int effectCount,
-            IntPtr numericPreconditions,
+            NumericPrecondition[] numericPreconditions,
             int numericPreconditionCount,
-            IntPtr numericEffects,
+            NumericEffect[] numericEffects,
             int numericEffectCount,
             out int actionIdOut);
 
@@ -1003,6 +1370,9 @@ namespace TensorPlanner
 
         [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
         internal static extern Status tp_state_add_goal_fact(StateHandle state, int predicateId, byte arity, int[] args);
+
+        [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern Status tp_state_set_function_value(StateHandle state, int functionId, byte arity, int[] args, float value);
 
         [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
         internal static extern SolverHandle tp_solver_create(DomainHandle domain);
