@@ -20,26 +20,26 @@ copy_tensor_planner_runtime_library :: () {
 }
 
 Numeric_Domain :: #run planner_domain(
-Type.[Agent, Location],
-Predicate.[
-    predicate("at", Agent, Location),
-    predicate("connected", Location, Location),
-],
-Function.[
-    function("energy", Agent),
-],
-Action.[
-    action(
-    "move",
-    Param.[param("agent", Agent), param("from", Location), param("to", Location)],
-    Atom.[atom("at", "agent", "from"), atom("connected", "from", "to")],
-    Numeric_Precondition.[numeric("energy", "agent") >= 1.0],
-    Atom.[atom("at", "agent", "from")],
-    Atom.[atom("at", "agent", "to")],
-    Numeric_Effect.[decrease(numeric("energy", "agent"), 1.0)]
-),
-],
-default_limits()
+    Type.[Agent, Location],
+    Predicate.[
+        predicate("at", Agent, Location),
+        predicate("connected", Location, Location),
+    ],
+    Function.[
+        function("energy", Agent),
+    ],
+    Action.[
+        action(
+            "move",
+            Param.[param("agent", Agent), param("from", Location), param("to", Location)],
+            Atom.[atom("at", "agent", "from"), atom("connected", "from", "to")],
+            Numeric_Precondition.[numeric("energy", "agent") >= 1.0],
+            Atom.[atom("at", "agent", "from")],
+            Atom.[atom("at", "agent", "to")],
+            Numeric_Effect.[decrease(numeric("energy", "agent"), 1.0)]
+        ),
+    ],
+    default_limits()
 );
 
 main :: () {

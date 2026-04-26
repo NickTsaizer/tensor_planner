@@ -243,24 +243,24 @@ install_actions :: (planner: *Planner, domain: Planner_Domain) {
         numeric_effects := make_numeric_effects(domain, action_def);
         id: s32 = -1;
         assert_ok(
-        tp_domain_add_action_schema(
-        planner.domain,
-        cast(u8) action_def.params.count,
-        action_types.data,
-        preconditions.data,
-        cast(s32) preconditions.count,
-        effects.data,
-        cast(s32) effects.count,
-        numeric_preconditions.data,
-        cast(s32) numeric_preconditions.count,
-        numeric_effects.data,
-        cast(s32) numeric_effects.count,
-        *id
-    ),
-    "install action"
-);
-assert(id == it);
-}
+            tp_domain_add_action_schema(
+                planner.domain,
+                cast(u8) action_def.params.count,
+                action_types.data,
+                preconditions.data,
+                cast(s32) preconditions.count,
+                effects.data,
+                cast(s32) effects.count,
+                numeric_preconditions.data,
+                cast(s32) numeric_preconditions.count,
+                numeric_effects.data,
+                cast(s32) numeric_effects.count,
+                *id
+            ),
+            "install action"
+        );
+        assert(id == it);
+    }
 }
 
 make_runtime_value :: (state: *State, function_name: string, amount: float, refs: [] Object_Ref) -> Runtime_Value {

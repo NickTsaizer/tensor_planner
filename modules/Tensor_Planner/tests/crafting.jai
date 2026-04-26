@@ -32,102 +32,102 @@ crafting_limits :: () -> TP_Limits {
 }
 
 Crafting :: #run planner_domain(
-Type.[Agent, Item, Location],
-Predicate.[
-    predicate("at", Agent, Location),
-    predicate("has", Item),
-    predicate("connected", Location, Location),
-    predicate("gather_at", Item, Location),
-    predicate("home", Location),
-    predicate("requires_tool", Item, Item),
-    predicate("gather_bare_hands", Item),
-    predicate("recipe2_a", Item, Item),
-    predicate("recipe2_b", Item, Item),
-    predicate("recipe3_a", Item, Item),
-    predicate("recipe3_b", Item, Item),
-    predicate("recipe3_c", Item, Item),
-],
-Action.[
-    action(
-    "move",
-    Param.[param("agent", Agent), param("from", Location), param("to", Location)],
-    Atom.[atom("at", "agent", "from"), atom("connected", "from", "to")],
-    Atom.[atom("at", "agent", "from")],
-    Atom.[atom("at", "agent", "to")]
-),
-action(
-"gather_free",
-Param.[param("agent", Agent), param("item", Item), param("where", Location)],
-Atom.[
-    atom("at", "agent", "where"),
-    atom("gather_at", "item", "where"),
-    atom("gather_bare_hands", "item"),
-],
-Atom.[],
-Atom.[atom("has", "item")]
-),
-action(
-"gather_tool",
-Param.[
-    param("agent", Agent),
-    param("item", Item),
-    param("where", Location),
-    param("tool", Item),
-],
-Atom.[
-    atom("at", "agent", "where"),
-    atom("gather_at", "item", "where"),
-    atom("requires_tool", "item", "tool"),
-    atom("has", "tool"),
-],
-Atom.[],
-Atom.[atom("has", "item")]
-),
-action(
-"craft2",
-Param.[
-    param("agent", Agent),
-    param("item", Item),
-    param("where", Location),
-    param("first", Item),
-    param("second", Item),
-],
-Atom.[
-    atom("at", "agent", "where"),
-    atom("home", "where"),
-    atom("recipe2_a", "item", "first"),
-    atom("recipe2_b", "item", "second"),
-    atom("has", "first"),
-    atom("has", "second"),
-],
-Atom.[],
-Atom.[atom("has", "item")]
-),
-action(
-"craft3",
-Param.[
-    param("agent", Agent),
-    param("item", Item),
-    param("where", Location),
-    param("first", Item),
-    param("second", Item),
-    param("third", Item),
-],
-Atom.[
-    atom("at", "agent", "where"),
-    atom("home", "where"),
-    atom("recipe3_a", "item", "first"),
-    atom("recipe3_b", "item", "second"),
-    atom("recipe3_c", "item", "third"),
-    atom("has", "first"),
-    atom("has", "second"),
-    atom("has", "third"),
-],
-Atom.[],
-Atom.[atom("has", "item")]
-),
-],
-#run crafting_limits()
+    Type.[Agent, Item, Location],
+    Predicate.[
+        predicate("at", Agent, Location),
+        predicate("has", Item),
+        predicate("connected", Location, Location),
+        predicate("gather_at", Item, Location),
+        predicate("home", Location),
+        predicate("requires_tool", Item, Item),
+        predicate("gather_bare_hands", Item),
+        predicate("recipe2_a", Item, Item),
+        predicate("recipe2_b", Item, Item),
+        predicate("recipe3_a", Item, Item),
+        predicate("recipe3_b", Item, Item),
+        predicate("recipe3_c", Item, Item),
+    ],
+    Action.[
+        action(
+            "move",
+            Param.[param("agent", Agent), param("from", Location), param("to", Location)],
+            Atom.[atom("at", "agent", "from"), atom("connected", "from", "to")],
+            Atom.[atom("at", "agent", "from")],
+            Atom.[atom("at", "agent", "to")]
+        ),
+        action(
+            "gather_free",
+            Param.[param("agent", Agent), param("item", Item), param("where", Location)],
+            Atom.[
+                atom("at", "agent", "where"),
+                atom("gather_at", "item", "where"),
+                atom("gather_bare_hands", "item"),
+            ],
+            Atom.[],
+            Atom.[atom("has", "item")]
+        ),
+        action(
+            "gather_tool",
+            Param.[
+                param("agent", Agent),
+                param("item", Item),
+                param("where", Location),
+                param("tool", Item),
+            ],
+            Atom.[
+                atom("at", "agent", "where"),
+                atom("gather_at", "item", "where"),
+                atom("requires_tool", "item", "tool"),
+                atom("has", "tool"),
+            ],
+            Atom.[],
+            Atom.[atom("has", "item")]
+        ),
+        action(
+            "craft2",
+            Param.[
+                param("agent", Agent),
+                param("item", Item),
+                param("where", Location),
+                param("first", Item),
+                param("second", Item),
+            ],
+            Atom.[
+                atom("at", "agent", "where"),
+                atom("home", "where"),
+                atom("recipe2_a", "item", "first"),
+                atom("recipe2_b", "item", "second"),
+                atom("has", "first"),
+                atom("has", "second"),
+            ],
+            Atom.[],
+            Atom.[atom("has", "item")]
+        ),
+        action(
+            "craft3",
+            Param.[
+                param("agent", Agent),
+                param("item", Item),
+                param("where", Location),
+                param("first", Item),
+                param("second", Item),
+                param("third", Item),
+            ],
+            Atom.[
+                atom("at", "agent", "where"),
+                atom("home", "where"),
+                atom("recipe3_a", "item", "first"),
+                atom("recipe3_b", "item", "second"),
+                atom("recipe3_c", "item", "third"),
+                atom("has", "first"),
+                atom("has", "second"),
+                atom("has", "third"),
+            ],
+            Atom.[],
+            Atom.[atom("has", "item")]
+        ),
+    ],
+    #run crafting_limits()
 );
 
 main :: () {

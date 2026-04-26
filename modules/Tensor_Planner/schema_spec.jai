@@ -139,25 +139,26 @@ decrease :: (term: Numeric_Term, value: float) -> Numeric_Effect {
     return .{ term = term, op = .SUBTRACT, value = value };
 }
 
+
 action :: (
-name: string,
-params: [] Param,
-requires: [] Atom,
-removes: [] Atom,
-adds: [] Atom
+    name: string,
+    params: [] Param,
+    requires: [] Atom,
+    removes: [] Atom,
+    adds: [] Atom
 ) -> Action {
     assert(params.count <= TP_MAX_PARAMS);
     return action(name, params, requires, Numeric_Precondition.[], removes, adds, Numeric_Effect.[]);
 }
 
 action :: (
-name: string,
-params: [] Param,
-requires: [] Atom,
-numeric_requires: [] Numeric_Precondition,
-removes: [] Atom,
-adds: [] Atom,
-numeric_effects: [] Numeric_Effect
+    name: string,
+    params: [] Param,
+    requires: [] Atom,
+    numeric_requires: [] Numeric_Precondition,
+    removes: [] Atom,
+    adds: [] Atom,
+    numeric_effects: [] Numeric_Effect
 ) -> Action {
     assert(params.count <= TP_MAX_PARAMS);
     return .{
@@ -172,20 +173,20 @@ numeric_effects: [] Numeric_Effect
 }
 
 planner_domain :: (
-types: [] Type,
-predicates: [] Predicate,
-actions: [] Action,
-limits: TP_Limits
+    types: [] Type,
+    predicates: [] Predicate,
+    actions: [] Action,
+    limits: TP_Limits
 ) -> Planner_Domain {
     return planner_domain(types, predicates, Function.[], actions, limits);
 }
 
 planner_domain :: (
-types: [] Type,
-predicates: [] Predicate,
-functions: [] Function,
-actions: [] Action,
-limits: TP_Limits
+    types: [] Type,
+    predicates: [] Predicate,
+    functions: [] Function,
+    actions: [] Action,
+    limits: TP_Limits
 ) -> Planner_Domain {
     result := Planner_Domain.{
         limits = limits,
