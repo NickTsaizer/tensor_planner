@@ -25,6 +25,15 @@ namespace TensorPlanner
         NoSolution = 5
     }
 
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    public delegate void ScoreCandidatesCallback(
+        IntPtr schema,
+        IntPtr problem,
+        IntPtr userData,
+        IntPtr outActionScores,
+        IntPtr outStateValue,
+        IntPtr outHasStateValue);
+
     public sealed class Limits
     {
         public Limits(
@@ -808,6 +817,16 @@ namespace TensorPlanner
 
         public SolveResult Solve(StateBuilder state)
         {
+            return Solve(state, null, IntPtr.Zero);
+        }
+
+        public SolveResult Solve(StateBuilder state, ScoreCandidatesCallback scorer)
+        {
+            return Solve(state, scorer, IntPtr.Zero);
+        }
+
+        public SolveResult Solve(StateBuilder state, ScoreCandidatesCallback scorer, IntPtr userData)
+        {
             if (state == null)
             {
                 throw new ArgumentNullException("state");
@@ -816,7 +835,7 @@ namespace TensorPlanner
             EnterSolveOperation();
             try
             {
-                return SolveCore(state);
+                return SolveCore(state, scorer, userData);
             }
             finally
             {
@@ -829,7 +848,26 @@ namespace TensorPlanner
             return SolveAsync(state, CancellationToken.None);
         }
 
+        public Task<SolveResult> SolveAsync(StateBuilder state, ScoreCandidatesCallback scorer)
+        {
+            return SolveAsync(state, scorer, IntPtr.Zero, CancellationToken.None);
+        }
+
+        public Task<SolveResult> SolveAsync(StateBuilder state, ScoreCandidatesCallback scorer, IntPtr userData)
+        {
+            return SolveAsync(state, scorer, userData, CancellationToken.None);
+        }
+
         public Task<SolveResult> SolveAsync(StateBuilder state, CancellationToken cancellationToken)
+        {
+            return SolveAsync(state, null, IntPtr.Zero, cancellationToken);
+        }
+
+        public Task<SolveResult> SolveAsync(
+            StateBuilder state,
+            ScoreCandidatesCallback scorer,
+            IntPtr userData,
+            CancellationToken cancellationToken)
         {
             if (state == null)
             {
@@ -838,17 +876,21 @@ namespace TensorPlanner
 
             cancellationToken.ThrowIfCancellationRequested();
             EnterSolveOperation();
-            return SolveAsyncCore(state, cancellationToken);
+            return SolveAsyncCore(state, scorer, userData, cancellationToken);
         }
 
-        private async Task<SolveResult> SolveAsyncCore(StateBuilder state, CancellationToken cancellationToken)
+        private async Task<SolveResult> SolveAsyncCore(
+            StateBuilder state,
+            ScoreCandidatesCallback scorer,
+            IntPtr userData,
+            CancellationToken cancellationToken)
         {
             try
             {
                 return await Task.Run(() =>
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    SolveResult result = SolveCore(state);
+                    SolveResult result = SolveCore(state, scorer, userData);
                     cancellationToken.ThrowIfCancellationRequested();
                     return result;
                 }, cancellationToken).ConfigureAwait(false);
@@ -859,7 +901,7 @@ namespace TensorPlanner
             }
         }
 
-        private SolveResult SolveCore(StateBuilder state)
+        private SolveResult SolveCore(StateBuilder state, ScoreCandidatesCallback scorer, IntPtr userData)
         {
             Native.StateHandle nativeState = Native.tp_state_create(_domain, state.NativeObjectTypes.Count, state.NativeObjectTypes.ToArray());
             if (nativeState.IsInvalid)
@@ -894,6 +936,11 @@ namespace TensorPlanner
                 if (solver.IsInvalid)
                 {
                     throw new TensorPlannerException("tp_solver_create failed");
+                }
+
+                if (scorer != null)
+                {
+                    Check(Native.tp_solver_set_custom_guidance(solver, scorer, userData), "set custom guidance");
                 }
 
                 Status status = Native.tp_solver_solve(solver, nativeState, ref raw);
@@ -1376,6 +1423,15 @@ namespace TensorPlanner
 
         [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
         internal static extern SolverHandle tp_solver_create(DomainHandle domain);
+
+        [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern Status tp_solver_set_custom_guidance(
+            SolverHandle solver,
+            ScoreCandidatesCallback scorer,
+            IntPtr userData);
+
+        [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern Status tp_solver_use_default_guidance(SolverHandle solver);
 
         [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
         private static extern void tp_solver_destroy(IntPtr solver);

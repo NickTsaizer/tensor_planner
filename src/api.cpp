@@ -238,6 +238,342 @@ bool entity_on_boat(
   return false;
 }
 
+struct TensorFactKey {
+  int16_t predicate_id = -1;
+  uint8_t arity = 0;
+  std::array<int16_t, TP_MAX_ARITY> args {-1, -1, -1, -1};
+};
+
+struct UsefulFact {
+  TensorFactKey fact;
+  int32_t distance = 0;
+};
+
+bool tensor_fact_equals(const TensorFactKey &lhs, const TensorFactKey &rhs) {
+  if (lhs.predicate_id != rhs.predicate_id || lhs.arity != rhs.arity) {
+    return false;
+  }
+  for (uint8_t index = 0; index < lhs.arity; ++index) {
+    if (lhs.args[index] != rhs.args[index]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool problem_has_tensor_fact(const TP_Problem_Tensors *problem, const TensorFactKey &fact) {
+  for (int32_t fact_index = 0; fact_index < problem->fact_count; ++fact_index) {
+    if (!problem->true_pred_mask[fact_index] || problem->true_pred_id[fact_index] != fact.predicate_id) {
+      continue;
+    }
+
+    bool match = true;
+    for (uint8_t arg_index = 0; arg_index < fact.arity; ++arg_index) {
+      if (problem->true_pred_arg[fact_index * TP_MAX_ARITY + arg_index] != fact.args[arg_index]) {
+        match = false;
+        break;
+      }
+    }
+    if (match) {
+      return true;
+    }
+  }
+  return false;
+}
+
+int32_t useful_fact_distance(const std::vector<UsefulFact> &facts, const TensorFactKey &fact) {
+  for (const UsefulFact &useful : facts) {
+    if (tensor_fact_equals(useful.fact, fact)) {
+      return useful.distance;
+    }
+  }
+  return -1;
+}
+
+bool useful_predicate_exists(const std::vector<UsefulFact> &facts, int16_t predicate_id) {
+  return std::any_of(facts.begin(), facts.end(), [predicate_id](const UsefulFact &fact) {
+    return fact.fact.predicate_id == predicate_id;
+  });
+}
+
+bool add_useful_fact(std::vector<UsefulFact> *facts, const TensorFactKey &fact, int32_t distance) {
+  for (UsefulFact &useful : *facts) {
+    if (!tensor_fact_equals(useful.fact, fact)) {
+      continue;
+    }
+    if (distance < useful.distance) {
+      useful.distance = distance;
+      return true;
+    }
+    return false;
+  }
+
+  facts->push_back({fact, distance});
+  return true;
+}
+
+TensorFactKey goal_fact_at(const TP_Schema_Tensors *schema, const TP_Problem_Tensors *problem, int32_t goal_index) {
+  TensorFactKey fact {};
+  fact.predicate_id = problem->goal_pred_id[goal_index];
+  fact.arity = schema->pred_arity[fact.predicate_id];
+  for (uint8_t arg_index = 0; arg_index < fact.arity; ++arg_index) {
+    fact.args[arg_index] = problem->goal_pred_arg[goal_index * TP_MAX_ARITY + arg_index];
+  }
+  return fact;
+}
+
+bool unify_effect_with_fact(
+  const TP_Schema_Tensors *schema,
+  int32_t effect_row,
+  const TensorFactKey &fact,
+  std::array<int16_t, TP_MAX_PARAMS> *bindings
+) {
+  if (schema->eff_op[effect_row] != TP_EFFECT_ADD || schema->eff_pred_id[effect_row] != fact.predicate_id) {
+    return false;
+  }
+
+  for (uint8_t arg_index = 0; arg_index < fact.arity; ++arg_index) {
+    const int8_t slot = schema->eff_slot[effect_row * TP_MAX_ARITY + arg_index];
+    if (slot < 0 || slot >= TP_MAX_PARAMS) {
+      return false;
+    }
+    int16_t &bound_value = (*bindings)[static_cast<std::size_t>(slot)];
+    if (bound_value >= 0 && bound_value != fact.args[arg_index]) {
+      return false;
+    }
+    bound_value = fact.args[arg_index];
+  }
+  return true;
+}
+
+bool precondition_matches_problem_fact(
+  const TP_Schema_Tensors *schema,
+  const TP_Problem_Tensors *problem,
+  int32_t precondition_row,
+  int32_t fact_index,
+  std::array<int16_t, TP_MAX_PARAMS> *bindings
+) {
+  if (!problem->true_pred_mask[fact_index] || problem->true_pred_id[fact_index] != schema->pre_pred_id[precondition_row]) {
+    return false;
+  }
+
+  std::array<int16_t, TP_MAX_PARAMS> next_bindings = *bindings;
+  const int16_t predicate_id = schema->pre_pred_id[precondition_row];
+  const uint8_t arity = schema->pred_arity[predicate_id];
+  for (uint8_t arg_index = 0; arg_index < arity; ++arg_index) {
+    const int8_t slot = schema->pre_slot[precondition_row * TP_MAX_ARITY + arg_index];
+    if (slot < 0 || slot >= TP_MAX_PARAMS) {
+      return false;
+    }
+
+    const int16_t fact_arg = problem->true_pred_arg[fact_index * TP_MAX_ARITY + arg_index];
+    int16_t &bound_value = next_bindings[static_cast<std::size_t>(slot)];
+    if (bound_value >= 0 && bound_value != fact_arg) {
+      return false;
+    }
+    bound_value = fact_arg;
+  }
+
+  *bindings = next_bindings;
+  return true;
+}
+
+bool precondition_has_bound_slot(
+  const TP_Schema_Tensors *schema,
+  int32_t precondition_row,
+  const std::array<int16_t, TP_MAX_PARAMS> &bindings
+) {
+  const int16_t predicate_id = schema->pre_pred_id[precondition_row];
+  if (predicate_id < 0) {
+    return false;
+  }
+
+  const uint8_t arity = schema->pred_arity[predicate_id];
+  for (uint8_t arg_index = 0; arg_index < arity; ++arg_index) {
+    const int8_t slot = schema->pre_slot[precondition_row * TP_MAX_ARITY + arg_index];
+    if (slot >= 0 && slot < TP_MAX_PARAMS && bindings[static_cast<std::size_t>(slot)] >= 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool bind_preconditions_from_current_facts(
+  const TP_Schema_Tensors *schema,
+  const TP_Problem_Tensors *problem,
+  int32_t action_id,
+  std::array<int16_t, TP_MAX_PARAMS> *bindings
+) {
+  bool changed = false;
+  bool matched_any = false;
+
+  for (int32_t pass = 0; pass < TP_MAX_PARAMS; ++pass) {
+    changed = false;
+    for (int32_t phase = 0; phase < 2; ++phase) {
+      for (int32_t pre_index = 0; pre_index < schema->max_preconditions; ++pre_index) {
+        const int32_t pre_row = action_id * schema->max_preconditions + pre_index;
+        if (schema->pre_sign[pre_row] <= 0) {
+          continue;
+        }
+
+        const bool has_bound_slot = precondition_has_bound_slot(schema, pre_row, *bindings);
+        if ((phase == 0 && !has_bound_slot) || (phase == 1 && has_bound_slot)) {
+          continue;
+        }
+
+        for (int32_t fact_index = 0; fact_index < problem->fact_count; ++fact_index) {
+          const std::array<int16_t, TP_MAX_PARAMS> before = *bindings;
+          if (!precondition_matches_problem_fact(schema, problem, pre_row, fact_index, bindings)) {
+            continue;
+          }
+          matched_any = true;
+          if (*bindings != before) {
+            changed = true;
+          }
+          break;
+        }
+      }
+    }
+    if (!changed) {
+      break;
+    }
+  }
+
+  return matched_any;
+}
+
+bool make_bound_precondition_fact(
+  const TP_Schema_Tensors *schema,
+  int32_t precondition_row,
+  const std::array<int16_t, TP_MAX_PARAMS> &bindings,
+  TensorFactKey *out_fact
+) {
+  if (schema->pre_sign[precondition_row] <= 0) {
+    return false;
+  }
+
+  out_fact->predicate_id = schema->pre_pred_id[precondition_row];
+  out_fact->arity = schema->pred_arity[out_fact->predicate_id];
+  for (uint8_t arg_index = 0; arg_index < out_fact->arity; ++arg_index) {
+    const int8_t slot = schema->pre_slot[precondition_row * TP_MAX_ARITY + arg_index];
+    if (slot < 0 || slot >= TP_MAX_PARAMS || bindings[static_cast<std::size_t>(slot)] < 0) {
+      return false;
+    }
+    out_fact->args[arg_index] = bindings[static_cast<std::size_t>(slot)];
+  }
+  return true;
+}
+
+TensorFactKey instantiate_candidate_effect(
+  const TP_Schema_Tensors *schema,
+  const TP_Problem_Tensors *problem,
+  int32_t effect_row,
+  int32_t candidate_index
+) {
+  TensorFactKey fact {};
+  fact.predicate_id = schema->eff_pred_id[effect_row];
+  fact.arity = schema->pred_arity[fact.predicate_id];
+  const int16_t *candidate_args = &problem->cand_action_arg[candidate_index * TP_MAX_PARAMS];
+  for (uint8_t arg_index = 0; arg_index < fact.arity; ++arg_index) {
+    const int8_t slot = schema->eff_slot[effect_row * TP_MAX_ARITY + arg_index];
+    fact.args[arg_index] = slot >= 0 && slot < TP_MAX_PARAMS ? candidate_args[slot] : -1;
+  }
+  return fact;
+}
+
+std::vector<UsefulFact> build_goal_regression_facts(const TP_Schema_Tensors *schema, const TP_Problem_Tensors *problem) {
+  std::vector<UsefulFact> useful_facts;
+  useful_facts.reserve(static_cast<std::size_t>(problem->goal_count) * 8U);
+
+  for (int32_t goal_index = 0; goal_index < problem->goal_count; ++goal_index) {
+    if (!problem->goal_pred_mask[goal_index]) {
+      continue;
+    }
+    const TensorFactKey goal = goal_fact_at(schema, problem, goal_index);
+    if (!problem_has_tensor_fact(problem, goal)) {
+      add_useful_fact(&useful_facts, goal, 0);
+    }
+  }
+
+  for (int32_t distance = 0; distance < 12; ++distance) {
+    const std::size_t fact_count = useful_facts.size();
+    bool changed = false;
+    for (std::size_t useful_index = 0; useful_index < fact_count; ++useful_index) {
+      if (useful_facts[useful_index].distance != distance) {
+        continue;
+      }
+
+      for (int32_t action_id = 0; action_id < schema->action_count; ++action_id) {
+        for (int32_t effect_index = 0; effect_index < schema->max_effects; ++effect_index) {
+          const int32_t effect_row = action_id * schema->max_effects + effect_index;
+          std::array<int16_t, TP_MAX_PARAMS> bindings {-1, -1, -1, -1, -1, -1};
+          if (!unify_effect_with_fact(schema, effect_row, useful_facts[useful_index].fact, &bindings)) {
+            continue;
+          }
+
+          bind_preconditions_from_current_facts(schema, problem, action_id, &bindings);
+          for (int32_t pre_index = 0; pre_index < schema->max_preconditions; ++pre_index) {
+            const int32_t pre_row = action_id * schema->max_preconditions + pre_index;
+            TensorFactKey precondition_fact {};
+            if (!make_bound_precondition_fact(schema, pre_row, bindings, &precondition_fact)) {
+              continue;
+            }
+            if (!problem_has_tensor_fact(problem, precondition_fact)) {
+              changed = add_useful_fact(&useful_facts, precondition_fact, distance + 1) || changed;
+            }
+          }
+        }
+      }
+    }
+    if (!changed) {
+      break;
+    }
+  }
+
+  return useful_facts;
+}
+
+void goal_regression_scorer(
+  const TP_Schema_Tensors *schema,
+  const TP_Problem_Tensors *problem,
+  void *,
+  float *out_action_scores,
+  float *out_state_value,
+  bool *out_has_state_value
+) {
+  *out_has_state_value = false;
+  if (schema == nullptr || problem == nullptr) {
+    return;
+  }
+
+  const std::vector<UsefulFact> useful_facts = build_goal_regression_facts(schema, problem);
+  for (int32_t candidate_index = 0; candidate_index < problem->candidate_count; ++candidate_index) {
+    const int32_t schema_id = problem->cand_action_schema[candidate_index];
+    float score = 0.0f;
+    for (int32_t effect_index = 0; effect_index < schema->max_effects; ++effect_index) {
+      const int32_t effect_row = schema_id * schema->max_effects + effect_index;
+      if (schema->eff_op[effect_row] != TP_EFFECT_ADD && schema->eff_op[effect_row] != TP_EFFECT_DELETE) {
+        continue;
+      }
+
+      const TensorFactKey effect_fact = instantiate_candidate_effect(schema, problem, effect_row, candidate_index);
+      const int32_t distance = useful_fact_distance(useful_facts, effect_fact);
+      if (distance >= 0) {
+        const float value = 20000.0f / static_cast<float>((distance + 1) * (distance + 1));
+        score += schema->eff_op[effect_row] == TP_EFFECT_ADD ? value : -value * 2.0f;
+      } else if (schema->eff_op[effect_row] == TP_EFFECT_ADD && useful_predicate_exists(useful_facts, effect_fact.predicate_id)) {
+        score -= 250.0f;
+      } else if (schema->eff_op[effect_row] == TP_EFFECT_ADD) {
+        score -= 10.0f;
+      }
+    }
+    out_action_scores[candidate_index] = score;
+  }
+
+  *out_state_value = -static_cast<float>(useful_facts.size());
+  *out_has_state_value = true;
+}
+
 void tensor_baseline_scorer(
   const TP_Schema_Tensors *schema,
   const TP_Problem_Tensors *problem,
@@ -767,6 +1103,8 @@ TP_Solver *tp_solver_create(const TP_Domain *domain) {
   if (tp_domain_export_schema_tensors(domain, &solver->schema_tensors) == TP_STATUS_OK) {
     solver->has_schema_tensors = true;
   }
+  solver->scorer = goal_regression_scorer;
+  solver->scorer_user_data = nullptr;
   return solver;
 }
 
@@ -777,7 +1115,7 @@ void tp_solver_destroy(TP_Solver *solver) {
   delete solver;
 }
 
-TP_Status tp_solver_set_scorer(
+TP_Status tp_solver_set_custom_guidance(
   TP_Solver *solver,
   TP_Score_Candidates_Fn scorer,
   void *user_data
@@ -791,12 +1129,12 @@ TP_Status tp_solver_set_scorer(
   return TP_STATUS_OK;
 }
 
-TP_Status tp_solver_use_tensor_baseline_scorer(TP_Solver *solver) {
+TP_Status tp_solver_use_default_guidance(TP_Solver *solver) {
   if (solver == nullptr) {
     return TP_STATUS_INVALID_ARGUMENT;
   }
 
-  solver->scorer = tensor_baseline_scorer;
+  solver->scorer = goal_regression_scorer;
   solver->scorer_user_data = nullptr;
   return TP_STATUS_OK;
 }

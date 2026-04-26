@@ -153,7 +153,6 @@ int main() {
 
   TP_Solver *solver = tp_solver_create(domain);
   assert(solver != nullptr);
-  assert(tp_solver_use_tensor_baseline_scorer(solver) == TP_STATUS_OK);
 
   TP_Solve_Result result {};
   const TP_Status solve_status = tp_solver_solve(solver, state, &result);

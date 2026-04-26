@@ -366,6 +366,15 @@ public:
     return *this;
   }
 
+  template <typename T>
+  int32_t object_id(const T &object) const {
+    const auto found = object_ids_.find(const_cast<void *>(static_cast<const void *>(&object)));
+    if (found == object_ids_.end()) {
+      throw Error("unknown object id lookup");
+    }
+    return found->second;
+  }
+
 private:
   friend class Planner;
 
@@ -525,6 +534,26 @@ public:
   StateBuilder state() const { return StateBuilder(this); }
 
   SolveResult solve(const StateBuilder &state) const {
+    return solve_impl(state, nullptr, nullptr);
+  }
+
+  SolveResult solve(
+    const StateBuilder &state,
+    TP_Score_Candidates_Fn scorer,
+    void *scorer_user_data = nullptr
+  ) const {
+    return solve_impl(state, scorer, scorer_user_data);
+  }
+
+private:
+  friend class ActionBuilder;
+  friend class StateBuilder;
+
+  SolveResult solve_impl(
+    const StateBuilder &state,
+    TP_Score_Candidates_Fn scorer,
+    void *scorer_user_data
+  ) const {
     TP_State *raw_state = tp_state_create(
       domain_,
       static_cast<int32_t>(state.object_types_.size()),
@@ -555,6 +584,12 @@ public:
         throw Error("tp_solver_create failed");
       }
 
+      if (scorer != nullptr) {
+        detail::check(tp_solver_set_custom_guidance(solver, scorer, scorer_user_data), "set custom guidance");
+      } else {
+        detail::check(tp_solver_use_default_guidance(solver), "use default guidance");
+      }
+
       const TP_Status status = tp_solver_solve(solver, raw_state, &raw_result);
       SolveResult result;
       result.status_ = status;
@@ -580,10 +615,6 @@ public:
       throw;
     }
   }
-
-private:
-  friend class ActionBuilder;
-  friend class StateBuilder;
 
   Type type_for(std::type_index cpp_type, const std::string &name) {
     const auto found = types_.find(cpp_type);

@@ -118,6 +118,14 @@ edge :: (state: *State, predicate_name: string, a: Object_Ref, b: Object_Ref) {
 }
 
 solve :: (planner: *Planner, state: *State) -> Solve_Result {
+    return solve_internal(planner, state, null, null, false);
+}
+
+solve :: (planner: *Planner, state: *State, scorer: TP_Score_Candidates_Fn, user_data: *void = null) -> Solve_Result {
+    return solve_internal(planner, state, scorer, user_data, true);
+}
+
+solve_internal :: (planner: *Planner, state: *State, scorer: TP_Score_Candidates_Fn, user_data: *void, use_custom_guidance: bool) -> Solve_Result {
     object_types: [..] s32;
     for state.objects array_add(*object_types, it.native_type);
 
@@ -138,6 +146,11 @@ solve :: (planner: *Planner, state: *State) -> Solve_Result {
     result: Solve_Result;
     result.state = state;
     result.domain = state.domain;
+    if use_custom_guidance {
+        assert_ok(tp_solver_set_custom_guidance(planner.solver, scorer, user_data), "custom guidance");
+    } else {
+        assert_ok(tp_solver_use_default_guidance(planner.solver), "default guidance");
+    }
     assert_ok(tp_solver_solve(planner.solver, raw_state, *result.raw), "solve");
     return result;
 }

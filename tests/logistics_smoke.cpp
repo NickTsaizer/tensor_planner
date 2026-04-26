@@ -149,7 +149,7 @@ int main() {
   assert(solver != nullptr);
 
   int32_t goal_location = 4;
-  assert(tp_solver_set_scorer(solver, logistics_scorer, &goal_location) == TP_STATUS_OK);
+  assert(tp_solver_set_custom_guidance(solver, logistics_scorer, &goal_location) == TP_STATUS_OK);
   TP_Solve_Result guided {};
   assert(tp_solver_solve(solver, state, &guided) == TP_STATUS_OK);
   assert(guided.solved);

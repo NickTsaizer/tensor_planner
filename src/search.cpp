@@ -247,6 +247,65 @@ void shortlist_guided_candidates(std::vector<GuidedCandidate> *candidates, int64
   }
 }
 
+void shortlist_heuristic_candidates(
+  const TP_Domain &domain,
+  const TP_State &state,
+  std::vector<CandidateAction> *candidates,
+  int64_t *sort_time_us
+) {
+  if (candidates->empty()) {
+    return;
+  }
+
+  const auto sort_start = std::chrono::steady_clock::now();
+  std::vector<RankedCandidate> scored;
+  scored.reserve(candidates->size());
+  for (const CandidateAction &candidate : *candidates) {
+    scored.push_back({candidate, score_candidate_relevance(domain, state, candidate)});
+  }
+
+  const std::size_t keep_count = std::min(kPreferredKeep, scored.size());
+  const auto keep_end = scored.begin() + static_cast<std::ptrdiff_t>(keep_count);
+  if (keep_count < scored.size()) {
+    std::partial_sort(scored.begin(), keep_end, scored.end(), [](const RankedCandidate &lhs, const RankedCandidate &rhs) {
+      if (lhs.score != rhs.score) {
+        return lhs.score > rhs.score;
+      }
+      if (lhs.action.schema_id != rhs.action.schema_id) {
+        return lhs.action.schema_id < rhs.action.schema_id;
+      }
+      return lhs.action.args < rhs.action.args;
+    });
+    scored.resize(keep_count);
+  } else {
+    std::sort(scored.begin(), scored.end(), [](const RankedCandidate &lhs, const RankedCandidate &rhs) {
+      if (lhs.score != rhs.score) {
+        return lhs.score > rhs.score;
+      }
+      if (lhs.action.schema_id != rhs.action.schema_id) {
+        return lhs.action.schema_id < rhs.action.schema_id;
+      }
+      return lhs.action.args < rhs.action.args;
+    });
+  }
+
+  std::vector<CandidateAction> shortlisted_candidates;
+  shortlisted_candidates.reserve(scored.size());
+  for (const RankedCandidate &candidate : scored) {
+    shortlisted_candidates.push_back(candidate.action);
+  }
+  *candidates = std::move(shortlisted_candidates);
+
+  const auto sort_end = std::chrono::steady_clock::now();
+  if (sort_time_us != nullptr) {
+    *sort_time_us += std::chrono::duration_cast<std::chrono::microseconds>(sort_end - sort_start).count();
+  }
+}
+
+bool solver_has_model_scorer(const TP_Solver *solver) {
+  return solver != nullptr && solver->scorer != nullptr;
+}
+
 void heuristic_prefilter_candidates(
   const TP_Domain &domain,
   const TP_State &state,
@@ -285,11 +344,12 @@ std::vector<CandidateAction> generate_guided_candidates_with_widening(
   const TP_Domain &domain,
   const TP_State &state,
   int32_t max_candidates,
+  bool use_heuristic_prefilter,
   int32_t *candidate_generation_calls,
   int64_t *candidate_generation_time_us
 ) {
   int32_t budget = std::min(kInitialGuidedGroundingBudget, max_candidates);
-  const int32_t target = std::min(kGuidedGroundingTarget, max_candidates);
+  const int32_t target = use_heuristic_prefilter ? std::min(kGuidedGroundingTarget, max_candidates) : max_candidates;
   std::vector<CandidateAction> candidates;
   while (true) {
     const auto candidate_start = std::chrono::steady_clock::now();
@@ -301,7 +361,9 @@ std::vector<CandidateAction> generate_guided_candidates_with_widening(
     ++(*candidate_generation_calls);
 
     const int32_t generated_count = static_cast<int32_t>(candidates.size());
-    heuristic_prefilter_candidates(domain, state, &candidates);
+    if (use_heuristic_prefilter) {
+      heuristic_prefilter_candidates(domain, state, &candidates);
+    }
     if (budget >= max_candidates || generated_count >= target || generated_count < budget) {
       break;
     }
@@ -408,7 +470,10 @@ TP_Status solve_guided_search(
   while (!open_set.empty() && expansions < domain.limits.max_expansions) {
     const QueueEntry current_entry = open_set.top();
     open_set.pop();
-    const SearchNode current = nodes[static_cast<std::size_t>(current_entry.node_index)];
+    const int32_t current_node_index = current_entry.node_index;
+    const SearchNode &current = nodes[static_cast<std::size_t>(current_node_index)];
+    const int32_t current_g_cost = current.g_cost;
+    const float current_guidance_score = current.guidance_score;
     ++expansions;
 
     if (current.h_cost == 0) {
@@ -430,45 +495,51 @@ TP_Status solve_guided_search(
       domain,
       current.state,
       domain.limits.max_candidates,
+      !solver_has_model_scorer(solver),
       &candidate_generation_calls,
       &candidate_generation_time_us
     );
     float state_value = 0.0f;
     bool has_state_value = false;
     std::vector<float> action_scores;
-    score_candidate_models(
-      domain,
-      current.state,
-      solver,
-      candidates,
-      &action_scores,
-      &state_value,
-      &has_state_value,
-      &scorer_calls,
-      &scorer_export_time_us,
-      &scorer_time_us,
-      &scorer_sort_time_us
-    );
-    std::vector<GuidedCandidate> guided_candidates = build_guided_candidates(
-      domain,
-      current.state,
-      candidates,
-      action_scores
-    );
-    shortlist_guided_candidates(&guided_candidates, &scorer_sort_time_us);
-    candidates.clear();
-    action_scores.clear();
-    candidates.reserve(guided_candidates.size());
-    action_scores.reserve(guided_candidates.size());
-    for (const GuidedCandidate &candidate : guided_candidates) {
-      candidates.push_back(candidate.action);
-      action_scores.push_back(candidate.model_score);
+    if (solver_has_model_scorer(solver)) {
+      score_candidate_models(
+        domain,
+        current.state,
+        solver,
+        candidates,
+        &action_scores,
+        &state_value,
+        &has_state_value,
+        &scorer_calls,
+        &scorer_export_time_us,
+        &scorer_time_us,
+        &scorer_sort_time_us
+      );
+      std::vector<GuidedCandidate> guided_candidates = build_guided_candidates(
+        domain,
+        current.state,
+        candidates,
+        action_scores
+      );
+      shortlist_guided_candidates(&guided_candidates, &scorer_sort_time_us);
+      candidates.clear();
+      action_scores.clear();
+      candidates.reserve(guided_candidates.size());
+      action_scores.reserve(guided_candidates.size());
+      for (const GuidedCandidate &candidate : guided_candidates) {
+        candidates.push_back(candidate.action);
+        action_scores.push_back(candidate.model_score);
+      }
+    } else {
+      shortlist_heuristic_candidates(domain, current.state, &candidates, &scorer_sort_time_us);
     }
     generated += static_cast<int32_t>(candidates.size());
 
     for (std::size_t candidate_index = 0; candidate_index < candidates.size(); ++candidate_index) {
       const CandidateAction &candidate = candidates[candidate_index];
-      TP_State next_state = apply_action(domain, current.state, candidate);
+      const SearchNode &parent = nodes[static_cast<std::size_t>(current_node_index)];
+      TP_State next_state = apply_action(domain, parent.state, candidate);
       std::vector<int32_t> signature = make_state_signature(next_state);
       if (visited.find(signature) != visited.end()) {
         continue;
@@ -476,11 +547,11 @@ TP_Status solve_guided_search(
 
       SearchNode child {};
       child.state = std::move(next_state);
-      child.parent_index = current_entry.node_index;
-      child.g_cost = current.g_cost + 1;
+      child.parent_index = current_node_index;
+      child.g_cost = current_g_cost + 1;
       child.h_cost = count_unsatisfied_goals(child.state);
       const float action_score = candidate_index < action_scores.size() ? action_scores[candidate_index] : 0.0f;
-      child.guidance_score = current.guidance_score + action_score;
+      child.guidance_score = current_guidance_score + action_score;
       child.priority = compute_priority(
         child.g_cost,
         child.h_cost,

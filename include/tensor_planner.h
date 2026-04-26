@@ -324,13 +324,13 @@ void tp_action_graph_dispose(TP_Action_Graph *graph);
 TP_Solver *tp_solver_create(const TP_Domain *domain);
 void tp_solver_destroy(TP_Solver *solver);
 
-TP_Status tp_solver_set_scorer(
+TP_Status tp_solver_set_custom_guidance(
   TP_Solver *solver,
   TP_Score_Candidates_Fn scorer,
   void *user_data
 );
 
-TP_Status tp_solver_use_tensor_baseline_scorer(TP_Solver *solver);
+TP_Status tp_solver_use_default_guidance(TP_Solver *solver);
 
 TP_Status tp_solver_solve(
   TP_Solver *solver,
