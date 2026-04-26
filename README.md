@@ -6,8 +6,6 @@ library searches for a valid sequence of actions and returns a plan you can
 execute in your own runtime.
 
 It is designed around a small C ABI, with friendly bindings layered on top:
-
-- **C API** for engine/runtime integrations and language bindings.
 - **C++ fluent API** for strongly typed native projects.
 - **C# / Unity API** for managed gameplay code and Unity packages.
 - **Jai module** with generated C bindings plus a type-first Jai wrapper.
