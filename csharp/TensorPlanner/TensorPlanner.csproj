@@ -7,7 +7,7 @@
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
     <PackageId>TensorPlanner</PackageId>
     <Title>Tensor Planner</Title>
-    <Version>0.1.0</Version>
+    <Version>0.1.1</Version>
     <Authors>tensor-planner</Authors>
     <Description>Unity-compatible C# wrapper for the Tensor Planner native library.</Description>
     <PackageTags>planning;planner;unity;native;wrapper</PackageTags>

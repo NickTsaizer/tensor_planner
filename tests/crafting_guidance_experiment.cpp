@@ -37,6 +37,7 @@ struct CraftingDomain {
   tp::Predicate recipe3_a;
   tp::Predicate recipe3_b;
   tp::Predicate recipe3_c;
+  tp::Function count;
 
   tp::Action move;
   tp::Action gather_free;
@@ -74,24 +75,6 @@ struct CraftingObjects {
   }
 };
 
-struct GuidanceContext {
-  int32_t gather_free_id = -1;
-  int32_t gather_tool_id = -1;
-  int32_t craft2_id = -1;
-  int32_t craft3_id = -1;
-  int32_t flint_id = -1;
-  int32_t fiber_id = -1;
-  int32_t wood_id = -1;
-  int32_t stone_id = -1;
-  int32_t iron_ore_id = -1;
-  int32_t diamond_id = -1;
-  int32_t flint_axe_id = -1;
-  int32_t stick_id = -1;
-  int32_t stone_pickaxe_id = -1;
-  int32_t iron_pickaxe_id = -1;
-  int32_t diamond_pickaxe_id = -1;
-};
-
 void check(bool condition, const char *message) {
   if (!condition) {
     std::cerr << "crafting_guidance_experiment failed: " << message << '\n';
@@ -113,6 +96,7 @@ CraftingDomain build_domain(tp::Planner &planner) {
     .recipe3_a = planner.predicate<Item, Item>("recipe3_a"),
     .recipe3_b = planner.predicate<Item, Item>("recipe3_b"),
     .recipe3_c = planner.predicate<Item, Item>("recipe3_c"),
+    .count = planner.function<Item>("count"),
   };
 
   domain.move = planner.action("move")
@@ -133,6 +117,7 @@ CraftingDomain build_domain(tp::Planner &planner) {
     .require(domain.gather_at("item", "where"))
     .require(domain.gather_bare_hands("item"))
     .adds(domain.has("item"))
+    .increases(domain.count("item"), 1.0f)
     .commit();
 
   domain.gather_tool = planner.action("gather_tool")
@@ -145,6 +130,7 @@ CraftingDomain build_domain(tp::Planner &planner) {
     .require(domain.requires_tool("item", "tool"))
     .require(domain.has("tool"))
     .adds(domain.has("item"))
+    .increases(domain.count("item"), 1.0f)
     .commit();
 
   domain.craft2 = planner.action("craft2")
@@ -159,7 +145,12 @@ CraftingDomain build_domain(tp::Planner &planner) {
     .require(domain.recipe2_b("item", "second"))
     .require(domain.has("first"))
     .require(domain.has("second"))
+    .require(domain.count("first") >= 1.0f)
+    .require(domain.count("second") >= 1.0f)
     .adds(domain.has("item"))
+    .decreases(domain.count("first"), 1.0f)
+    .decreases(domain.count("second"), 1.0f)
+    .increases(domain.count("item"), 1.0f)
     .commit();
 
   domain.craft3 = planner.action("craft3")
@@ -177,7 +168,14 @@ CraftingDomain build_domain(tp::Planner &planner) {
     .require(domain.has("first"))
     .require(domain.has("second"))
     .require(domain.has("third"))
+    .require(domain.count("first") >= 1.0f)
+    .require(domain.count("second") >= 1.0f)
+    .require(domain.count("third") >= 1.0f)
     .adds(domain.has("item"))
+    .decreases(domain.count("first"), 1.0f)
+    .decreases(domain.count("second"), 1.0f)
+    .decreases(domain.count("third"), 1.0f)
+    .increases(domain.count("item"), 1.0f)
     .commit();
 
   return domain;
@@ -186,6 +184,10 @@ CraftingDomain build_domain(tp::Planner &planner) {
 void add_edge(tp::StateBuilder &state, const CraftingDomain &domain, Location &a, Location &b) {
   state.fact(domain.connected(a, b));
   state.fact(domain.connected(b, a));
+}
+
+void add_count_value(tp::StateBuilder &state, const CraftingDomain &domain, Item &item) {
+  state.value(domain.count(item), 0.0f);
 }
 
 tp::StateBuilder build_state(tp::Planner &planner, const CraftingDomain &domain, CraftingObjects &objects) {
@@ -215,6 +217,21 @@ tp::StateBuilder build_state(tp::Planner &planner, const CraftingDomain &domain,
     .object(objects.diamond_pickaxe)
     .fact(domain.at(objects.agent, objects.home))
     .fact(domain.home(objects.home));
+
+  add_count_value(state, domain, objects.flint);
+  add_count_value(state, domain, objects.fiber);
+  add_count_value(state, domain, objects.wood);
+  add_count_value(state, domain, objects.stone);
+  add_count_value(state, domain, objects.iron_ore);
+  add_count_value(state, domain, objects.diamond);
+  for (Item &distraction : objects.distractions) {
+    add_count_value(state, domain, distraction);
+  }
+  add_count_value(state, domain, objects.flint_axe);
+  add_count_value(state, domain, objects.stick);
+  add_count_value(state, domain, objects.stone_pickaxe);
+  add_count_value(state, domain, objects.iron_pickaxe);
+  add_count_value(state, domain, objects.diamond_pickaxe);
 
   add_edge(state, domain, objects.home, objects.forest);
   add_edge(state, domain, objects.forest, objects.river);
@@ -256,73 +273,6 @@ tp::StateBuilder build_state(tp::Planner &planner, const CraftingDomain &domain,
     .goal(domain.has(objects.diamond_pickaxe));
 
   return state;
-}
-
-GuidanceContext build_guidance_context(
-  const CraftingDomain &domain,
-  const CraftingObjects &objects,
-  const tp::StateBuilder &state
-) {
-  const auto id_of = [&state](auto &object) {
-    return state.object_id(object);
-  };
-
-  return GuidanceContext{
-    .gather_free_id = domain.gather_free.id,
-    .gather_tool_id = domain.gather_tool.id,
-    .craft2_id = domain.craft2.id,
-    .craft3_id = domain.craft3.id,
-    .flint_id = id_of(objects.flint),
-    .fiber_id = id_of(objects.fiber),
-    .wood_id = id_of(objects.wood),
-    .stone_id = id_of(objects.stone),
-    .iron_ore_id = id_of(objects.iron_ore),
-    .diamond_id = id_of(objects.diamond),
-    .flint_axe_id = id_of(objects.flint_axe),
-    .stick_id = id_of(objects.stick),
-    .stone_pickaxe_id = id_of(objects.stone_pickaxe),
-    .iron_pickaxe_id = id_of(objects.iron_pickaxe),
-    .diamond_pickaxe_id = id_of(objects.diamond_pickaxe),
-  };
-}
-
-float score_target_item(int16_t item_id, const GuidanceContext &context) {
-  if (item_id == context.diamond_pickaxe_id) return 5000.0f;
-  if (item_id == context.iron_pickaxe_id) return 4200.0f;
-  if (item_id == context.diamond_id) return 3800.0f;
-  if (item_id == context.stone_pickaxe_id) return 3200.0f;
-  if (item_id == context.stone_id) return 2800.0f;
-  if (item_id == context.stick_id) return 2400.0f;
-  if (item_id == context.wood_id) return 2200.0f;
-  if (item_id == context.flint_axe_id) return 1800.0f;
-  if (item_id == context.flint_id) return 1300.0f;
-  if (item_id == context.fiber_id) return 1200.0f;
-  if (item_id == context.iron_ore_id) return 1000.0f;
-  return -250.0f;
-}
-
-void crafting_guidance_scorer(
-  const TP_Schema_Tensors *,
-  const TP_Problem_Tensors *problem,
-  void *user_data,
-  float *out_action_scores,
-  float *,
-  bool *out_has_state_value
-) {
-  *out_has_state_value = false;
-  const GuidanceContext &context = *static_cast<const GuidanceContext *>(user_data);
-
-  for (int32_t candidate_index = 0; candidate_index < problem->candidate_count; ++candidate_index) {
-    const int32_t schema_id = problem->cand_action_schema[candidate_index];
-    const int16_t *args = &problem->cand_action_arg[candidate_index * TP_MAX_PARAMS];
-    float score = 0.0f;
-    if (schema_id == context.gather_free_id || schema_id == context.gather_tool_id) {
-      score = score_target_item(args[1], context);
-    } else if (schema_id == context.craft2_id || schema_id == context.craft3_id) {
-      score = score_target_item(args[1], context);
-    }
-    out_action_scores[candidate_index] = score;
-  }
 }
 
 void print_result(const char *label, const tp::SolveResult &result) {
@@ -398,10 +348,13 @@ int main() {
   std::cout << "guided_expansion_cap=" << kGuidedExpansionCap << '\n';
 
   for (const int32_t distraction_count : distraction_counts) {
-    const RunSummary guided = solve_crafting_case(distraction_count, kGuidedExpansionCap);
-    print_summary(distraction_count, "default_goal_regression", guided);
-    check(guided.status == TP_STATUS_OK, "default solve status");
-    check(guided.solved, "default solve solved");
+    const RunSummary default_guided = solve_crafting_case(
+      distraction_count,
+      kGuidedExpansionCap
+    );
+    print_summary(distraction_count, "default_goal_regression", default_guided);
+    check(default_guided.status == TP_STATUS_OK, "default solve status");
+    check(default_guided.solved, "default solve solved");
 
     std::cout << '\n';
     std::cout << std::flush;

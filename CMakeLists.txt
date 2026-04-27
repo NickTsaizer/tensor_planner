@@ -51,7 +51,7 @@ configure_package_config_file(
 
 write_basic_package_version_file(
   ${CMAKE_CURRENT_BINARY_DIR}/tensor_plannerConfigVersion.cmake
-  VERSION 0.1.0
+  VERSION 0.1.1
   COMPATIBILITY SameMajorVersion
 )
 
