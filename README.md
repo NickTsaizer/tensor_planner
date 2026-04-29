@@ -275,4 +275,3 @@ alive while reading results.
 - Action arity and predicate arity are bounded by `TP_MAX_PARAMS` and
   `TP_MAX_ARITY` in the C API.
 - The public package intentionally exposes the guided planner path only.
-- No license file is currently included in this repository.
