@@ -12,18 +12,18 @@ CLEAN_AFTER=1
 print_usage() {
   cat <<'USAGE'
 Usage:
-  sh ./build.sh [-release|-debug] [-os <linux|windows>...] -target <unity|cpp|sharp|jai>... [-o <output-dir>] [-no-clean]
+  sh ./build.sh [-release|-debug] [-os <linux|windows>...] -target <unity|cpp|sharp|jai|unreal>... [-o <output-dir>] [-no-clean]
 
 Examples:
-  sh ./build.sh -release -os linux -target unity cpp sharp jai -o ./dist
-  sh ./build.sh -release -os windows -target unity cpp sharp -o ./dist
+  sh ./build.sh -release -os linux -target unity cpp sharp jai unreal -o ./dist
+  sh ./build.sh -release -os windows -target unity cpp sharp unreal -o ./dist
   sh ./build.sh -target unity cpp -os linux windows -o ./dist
 
 Options:
   -release       Build Release artifacts. This is the default.
   -debug         Build Debug artifacts.
   -os            One or more target OS values: linux windows. Defaults to host OS.
-  -target        One or more targets: unity cpp sharp jai.
+  -target        One or more targets: unity cpp sharp jai unreal.
   -o             Output directory. Defaults to ./dist.
   -no-clean      Keep generated build-process files after packaging.
   -h, --help     Show this help.
@@ -70,7 +70,7 @@ append_unique_word() {
 
 append_target() {
   case "$1" in
-    unity|cpp|sharp|jai) TARGETS=$(append_unique_word "$TARGETS" "$1") ;;
+    unity|cpp|sharp|jai|unreal) TARGETS=$(append_unique_word "$TARGETS" "$1") ;;
     *) fail "unknown target: $1" ;;
   esac
 }
@@ -199,6 +199,38 @@ unity_plugin_path_for_os() {
     linux) printf 'Runtime/Plugins/x86_64/libtensor_planner.so\n' ;;
     windows) printf 'Runtime/Plugins/x86_64/tensor_planner.dll\n' ;;
   esac
+}
+
+unreal_platform_dir_for_os() {
+  case "$1" in
+    linux) printf 'Linux\n' ;;
+    windows) printf 'Win64\n' ;;
+  esac
+}
+
+native_link_library_path() {
+  os="$1"
+  build_dir=$(build_dir_for_os "$os")
+
+  case "$os" in
+    linux)
+      candidate="$build_dir/$(library_name_for_os "$os")"
+      [ -f "$candidate" ] && { printf '%s\n' "$candidate"; return; }
+      ;;
+    windows)
+      for candidate in \
+        "$build_dir/tensor_planner.lib" \
+        "$build_dir/libtensor_planner.dll.a" \
+        "$build_dir/Release/tensor_planner.lib" \
+        "$build_dir/Release/libtensor_planner.dll.a" \
+        "$build_dir/Debug/tensor_planner.lib" \
+        "$build_dir/Debug/libtensor_planner.dll.a"; do
+        [ -f "$candidate" ] && { printf '%s\n' "$candidate"; return; }
+      done
+      ;;
+  esac
+
+  fail "native link library for $os not found in $build_dir"
 }
 
 require_toolchain_for_os() {
@@ -343,6 +375,30 @@ stage_jai() {
   info "Created $out"
 }
 
+prepare_unreal_package() {
+  out="$OUTPUT_ROOT/unreal/TensorPlanner"
+  clean_dir "$out"
+  copy_file "$SCRIPT_DIR/unreal/TensorPlanner/TensorPlanner.uplugin" "$out/TensorPlanner.uplugin"
+  copy_file "$SCRIPT_DIR/unreal/TensorPlanner/README.md" "$out/README.md"
+  copy_file "$SCRIPT_DIR/LICENSE" "$out/LICENSE"
+  copy_dir "$SCRIPT_DIR/unreal/TensorPlanner/Source/TensorPlanner" "$out/Source/TensorPlanner"
+  copy_dir "$SCRIPT_DIR/include" "$out/Source/ThirdParty/TensorPlanner/include"
+}
+
+stage_unreal_for_os() {
+  os="$1"
+  out="$OUTPUT_ROOT/unreal/TensorPlanner"
+  platform_dir=$(unreal_platform_dir_for_os "$os")
+  runtime_lib=$(native_library_path "$os")
+  runtime_name=$(library_name_for_os "$os")
+  link_lib=$(native_link_library_path "$os")
+  link_name=$(basename "$link_lib")
+
+  copy_file "$runtime_lib" "$out/Binaries/ThirdParty/TensorPlanner/$platform_dir/$runtime_name"
+  copy_file "$link_lib" "$out/Source/ThirdParty/TensorPlanner/lib/$platform_dir/$link_name"
+  info "Added Unreal native files for $os"
+}
+
 cleanup_build_process_files() {
   [ "$CLEAN_AFTER" -eq 1 ] || return 0
   info "Cleaning build-process files..."
@@ -365,6 +421,11 @@ main() {
     prepare_unity_package
     for os in $TARGET_OSES; do stage_unity_for_os "$os"; done
     info "Created $OUTPUT_ROOT/unity/dev.nick.tensor-planner"
+  fi
+  if has_target unreal; then
+    prepare_unreal_package
+    for os in $TARGET_OSES; do stage_unreal_for_os "$os"; done
+    info "Created $OUTPUT_ROOT/unreal/TensorPlanner"
   fi
   if has_target cpp; then
     for os in $TARGET_OSES; do stage_cpp_for_os "$os"; done

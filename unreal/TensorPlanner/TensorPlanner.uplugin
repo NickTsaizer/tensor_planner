@@ -1,0 +1,18 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "0.1.1",
+  "FriendlyName": "Tensor Planner",
+  "Description": "Unreal Engine runtime wrapper for the Tensor Planner native library.",
+  "Category": "Runtime",
+  "EnabledByDefault": false,
+  "CanContainContent": false,
+  "Installed": false,
+  "Modules": [
+    {
+      "Name": "TensorPlanner",
+      "Type": "Runtime",
+      "LoadingPhase": "Default"
+    }
+  ]
+}

@@ -9,6 +9,7 @@ It is designed around a small C ABI, with friendly bindings layered on top:
 - **C++ fluent API** for strongly typed native projects.
 - **C# / Unity API** for managed gameplay code and Unity packages.
 - **Jai module** with generated C bindings plus a type-first Jai wrapper.
+- **Unreal Engine source plugin** with Unreal-native types and soft object references.
 
 Full documentation lives in the GitHub Wiki:
 
@@ -52,6 +53,7 @@ simulation tooling, reachability checks, and model-assisted action ranking.
 - Explicit memory ownership for native callers.
 - Unity package structure with runnable scripts.
 - Distribution script for C++, C#, Unity, and Jai artifacts.
+- Unreal Engine wrapper with `FString`, `TArray`, and `TSoftObjectPtr<>`-based planning objects.
 
 ## Quick start: C++ planning task
 
@@ -176,17 +178,18 @@ Requirements:
 - .NET SDK for C# wrapper validation
 - Jai compiler for the Jai module and runnable snippets
 - `x86_64-w64-mingw32-g++` only when cross-building Windows artifacts on Linux
+- Unreal Engine 5.6+ to consume the packaged Unreal source plugin
 
 Build distribution artifacts:
 
 ```bash
-sh ./build.sh -release -target unity cpp sharp jai -o ./dist
+sh ./build.sh -release -target unity cpp sharp jai unreal -o ./dist
 ```
 
 On Windows, use the PowerShell equivalent:
 
 ```powershell
-pwsh ./build.ps1 -release -os windows -target unity cpp sharp jai -o ./dist
+pwsh ./build.ps1 -release -os windows -target unity cpp sharp jai unreal -o ./dist
 ```
 
 Useful variants:
@@ -194,11 +197,13 @@ Useful variants:
 ```bash
 sh ./build.sh -target unity cpp -os linux windows -o ./dist
 sh ./build.sh -debug -target cpp sharp -o ./dist -no-clean
+sh ./build.sh -target unreal cpp -os linux -o ./dist
 ```
 
 ```powershell
 pwsh ./build.ps1 -target unity cpp -os windows -o ./dist
 pwsh ./build.ps1 -debug -target cpp sharp -o ./dist -no-clean
+pwsh ./build.ps1 -target unreal cpp -os windows -o ./dist
 ```
 
 Build native library and tests manually:
@@ -225,6 +230,7 @@ csharp/TensorPlanner/       .NET project linking the Unity-first C# wrapper
 csharp/TensorPlanner.Smoke/ C# smoke test
 dev.nick.tensor-planner/    Unity package source and runnable scripts
 modules/Tensor_Planner/     Jai generated binding workflow and wrapper
+unreal/TensorPlanner/       Unreal Engine source plugin template and wrapper API
 build.sh                    POSIX distribution build script
 build.ps1                   PowerShell distribution build script for Windows
 ```
@@ -237,6 +243,7 @@ build.ps1                   PowerShell distribution build script for Windows
 | C++ fluent API | Typed C++ gameplay/simulation code | `include/tensor_planner.hpp` |
 | C# / Unity | Unity gameplay code and .NET tools | `dev.nick.tensor-planner/Runtime/TensorPlanner.cs` |
 | Jai | Jai modules and compile-time typed domains | `modules/Tensor_Planner/module.jai` |
+| Unreal Engine | UE 5 source plugin with soft object references | `unreal/TensorPlanner/Source/TensorPlanner/Public/TensorPlannerUnreal.h` |
 
 ## How it works, briefly
 

@@ -12,10 +12,10 @@ $CleanAfter = $true
 function Show-Usage {
     @"
 Usage:
-  pwsh ./build.ps1 [-release|-debug] [-os <linux|windows>...] -target <unity|cpp|sharp|jai>... [-o <output-dir>] [-no-clean]
+  pwsh ./build.ps1 [-release|-debug] [-os <linux|windows>...] -target <unity|cpp|sharp|jai|unreal>... [-o <output-dir>] [-no-clean]
 
 Examples:
-  pwsh ./build.ps1 -release -os windows -target unity cpp sharp -o ./dist
+  pwsh ./build.ps1 -release -os windows -target unity cpp sharp unreal -o ./dist
   pwsh ./build.ps1 -target unity cpp -os windows -o ./dist
   pwsh ./build.ps1 -debug -target cpp -no-clean
 
@@ -23,7 +23,7 @@ Options:
   -release       Build Release artifacts. This is the default.
   -debug         Build Debug artifacts.
   -os            One or more target OS values: linux windows. Defaults to host OS.
-  -target        One or more targets: unity cpp sharp jai.
+  -target        One or more targets: unity cpp sharp jai unreal.
   -o             Output directory. Defaults to ./dist.
   -no-clean      Keep generated build-process files after packaging.
   -h, --help     Show this help.
@@ -78,7 +78,7 @@ function Add-UniqueValue {
 function Add-Target {
     param([Parameter(Mandatory = $true)][string]$Value)
     switch ($Value) {
-        { $_ -in @("unity", "cpp", "sharp", "jai") } { $script:Targets = @(Add-UniqueValue -Values $script:Targets -Value $Value); return }
+        { $_ -in @("unity", "cpp", "sharp", "jai", "unreal") } { $script:Targets = @(Add-UniqueValue -Values $script:Targets -Value $Value); return }
         default { Fail "unknown target: $Value" }
     }
 }
@@ -238,6 +238,42 @@ function Get-UnityPluginPathForOs {
         "linux" { return "Runtime/Plugins/x86_64/libtensor_planner.so" }
         "windows" { return "Runtime/Plugins/x86_64/tensor_planner.dll" }
     }
+}
+
+function Get-UnrealPlatformDirectoryForOs {
+    param([Parameter(Mandatory = $true)][string]$Os)
+    switch ($Os) {
+        "linux" { return "Linux" }
+        "windows" { return "Win64" }
+    }
+}
+
+function Get-NativeLinkLibraryPath {
+    param([Parameter(Mandatory = $true)][string]$Os)
+    $buildDir = Get-BuildDirectoryForOs $Os
+
+    switch ($Os) {
+        "linux" {
+            $candidate = Join-Path $buildDir (Get-LibraryNameForOs $Os)
+            if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+        }
+        "windows" {
+            $candidates = @(
+                (Join-Path $buildDir "tensor_planner.lib"),
+                (Join-Path $buildDir "libtensor_planner.dll.a"),
+                (Join-Path $buildDir "Release/tensor_planner.lib"),
+                (Join-Path $buildDir "Release/libtensor_planner.dll.a"),
+                (Join-Path $buildDir "Debug/tensor_planner.lib"),
+                (Join-Path $buildDir "Debug/libtensor_planner.dll.a")
+            )
+
+            foreach ($candidate in $candidates) {
+                if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+            }
+        }
+    }
+
+    Fail "native link library for $Os not found in $buildDir"
 }
 
 function Require-ToolchainForOs {
@@ -408,6 +444,30 @@ function Stage-Jai {
     Write-Info "Created $out"
 }
 
+function Prepare-UnrealPackage {
+    $out = Join-Path $script:OutputRoot "unreal/TensorPlanner"
+    Clear-Directory $out
+    Copy-FileChecked (Join-Path $script:ScriptDir "unreal/TensorPlanner/TensorPlanner.uplugin") (Join-Path $out "TensorPlanner.uplugin")
+    Copy-FileChecked (Join-Path $script:ScriptDir "unreal/TensorPlanner/README.md") (Join-Path $out "README.md")
+    Copy-FileChecked (Join-Path $script:ScriptDir "LICENSE") (Join-Path $out "LICENSE")
+    Copy-DirectoryChecked (Join-Path $script:ScriptDir "unreal/TensorPlanner/Source/TensorPlanner") (Join-Path $out "Source/TensorPlanner")
+    Copy-DirectoryChecked (Join-Path $script:ScriptDir "include") (Join-Path $out "Source/ThirdParty/TensorPlanner/include")
+}
+
+function Stage-UnrealForOs {
+    param([Parameter(Mandatory = $true)][string]$Os)
+    $out = Join-Path $script:OutputRoot "unreal/TensorPlanner"
+    $platformDir = Get-UnrealPlatformDirectoryForOs $Os
+    $runtimeLib = Get-NativeLibraryPath $Os
+    $runtimeName = Get-LibraryNameForOs $Os
+    $linkLib = Get-NativeLinkLibraryPath $Os
+    $linkName = Split-Path -Leaf $linkLib
+
+    Copy-FileChecked $runtimeLib (Join-Path $out "Binaries/ThirdParty/TensorPlanner/$platformDir/$runtimeName")
+    Copy-FileChecked $linkLib (Join-Path $out "Source/ThirdParty/TensorPlanner/lib/$platformDir/$linkName")
+    Write-Info "Added Unreal native files for $Os"
+}
+
 function Clear-BuildProcessFiles {
     if (-not $script:CleanAfter) { return }
     Write-Info "Cleaning build-process files..."
@@ -436,6 +496,15 @@ function Main {
         }
         $unityOutput = Join-Path $script:OutputRoot "unity/dev.nick.tensor-planner"
         Write-Info "Created $unityOutput"
+    }
+
+    if (Test-Target "unreal") {
+        Prepare-UnrealPackage
+        foreach ($os in $script:TargetOses) {
+            Stage-UnrealForOs $os
+        }
+        $unrealOutput = Join-Path $script:OutputRoot "unreal/TensorPlanner"
+        Write-Info "Created $unrealOutput"
     }
 
     if (Test-Target "cpp") {
