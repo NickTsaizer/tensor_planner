@@ -185,7 +185,7 @@ int32_t estimate_candidate_distance(
     int16_t effect_args[TP_MAX_ARITY] = {-1, -1, -1, -1};
     for (int32_t arg_index = 0; arg_index < TP_MAX_ARITY; ++arg_index) {
       const int8_t slot = schema->eff_slot[row * TP_MAX_ARITY + arg_index];
-      if (slot >= 0) {
+      if (slot >= 0 && slot < TP_MAX_PARAMS) {
         effect_args[arg_index] = candidate_args[slot];
       }
     }
@@ -603,7 +603,7 @@ void tensor_baseline_scorer(
       int16_t effect_args[TP_MAX_ARITY] = {-1, -1, -1, -1};
       for (int32_t arg_index = 0; arg_index < TP_MAX_ARITY; ++arg_index) {
         const int8_t slot = schema->eff_slot[row * TP_MAX_ARITY + arg_index];
-        if (slot >= 0) {
+        if (slot >= 0 && slot < TP_MAX_PARAMS) {
           effect_args[arg_index] = candidate_args[slot];
         }
       }
@@ -812,6 +812,7 @@ TP_Status tp_domain_add_action_schema(
     literal.predicate_id = preconditions[index].predicate_id;
     literal.sign = preconditions[index].sign;
     literal.arity = preconditions[index].arity;
+    literal.slots.fill(-1);
     for (uint8_t slot_index = 0; slot_index < literal.arity; ++slot_index) {
       literal.slots[slot_index] = preconditions[index].slots[slot_index];
     }
@@ -823,6 +824,7 @@ TP_Status tp_domain_add_action_schema(
     effect.predicate_id = effects[index].predicate_id;
     effect.op = effects[index].op;
     effect.arity = effects[index].arity;
+    effect.slots.fill(-1);
     for (uint8_t slot_index = 0; slot_index < effect.arity; ++slot_index) {
       effect.slots[slot_index] = effects[index].slots[slot_index];
     }
@@ -835,6 +837,7 @@ TP_Status tp_domain_add_action_schema(
     precondition.cmp_op = numeric_preconditions[index].cmp_op;
     precondition.arity = numeric_preconditions[index].arity;
     precondition.rhs_value = numeric_preconditions[index].rhs_value;
+    precondition.slots.fill(-1);
     for (uint8_t slot_index = 0; slot_index < precondition.arity; ++slot_index) {
       precondition.slots[slot_index] = numeric_preconditions[index].slots[slot_index];
     }
@@ -847,6 +850,7 @@ TP_Status tp_domain_add_action_schema(
     effect.op = numeric_effects[index].op;
     effect.arity = numeric_effects[index].arity;
     effect.rhs_value = numeric_effects[index].rhs_value;
+    effect.slots.fill(-1);
     for (uint8_t slot_index = 0; slot_index < effect.arity; ++slot_index) {
       effect.slots[slot_index] = numeric_effects[index].slots[slot_index];
     }

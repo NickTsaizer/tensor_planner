@@ -79,6 +79,18 @@ struct CandidateAction {
   std::array<int32_t, TP_MAX_PARAMS> args {};
 };
 
+struct CandidatePattern {
+  int32_t schema_id = -1;
+  uint8_t arity = 0;
+  std::array<int32_t, TP_MAX_PARAMS> args {};
+};
+
+struct ReducedTaskPatterns {
+  std::vector<CandidatePattern> relevant;
+  std::vector<CandidatePattern> reachable;
+  std::vector<CandidatePattern> filtered;
+};
+
 struct FunctionValue {
   int32_t function_id = -1;
   uint8_t arity = 0;
@@ -101,6 +113,12 @@ struct TP_State {
   std::vector<Fact> goals;
   mutable std::shared_ptr<StateIndices> indices_cache;
   mutable bool indices_dirty = true;
+  mutable std::vector<Fact> sorted_facts_cache;
+  mutable bool sorted_facts_dirty = true;
+  mutable std::vector<FunctionValue> sorted_function_values_cache;
+  mutable bool sorted_function_values_dirty = true;
+  mutable std::vector<int32_t> signature_cache;
+  mutable bool signature_dirty = true;
 };
 
 struct TP_Solver {
@@ -156,9 +174,10 @@ bool validate_function_value(
 
 Fact make_fact(int32_t predicate_id, uint8_t arity, const int32_t *args);
 bool fact_equals(const Fact &lhs, const Fact &rhs);
+bool action_schema_uses_valid_slots(const ActionSchema &schema);
 bool state_has_fact(const TP_State &state, const Fact &fact);
 bool add_fact_unique(std::vector<Fact> *facts, const Fact &fact);
-void remove_fact(std::vector<Fact> *facts, const Fact &fact);
+bool remove_fact(std::vector<Fact> *facts, const Fact &fact);
 int32_t count_unsatisfied_goals(const TP_State &state);
 bool upsert_function_value(std::vector<FunctionValue> *values, const FunctionValue &value);
 bool try_get_function_value(const TP_State &state, const FunctionValue &query, float *out_value);
@@ -168,7 +187,23 @@ void invalidate_state_indices(TP_State *state);
 std::vector<CandidateAction> generate_candidate_actions(
   const TP_Domain &domain,
   const TP_State &state,
-  int32_t max_candidates
+  int32_t max_candidates,
+  const std::vector<CandidatePattern> *relevant_patterns = nullptr
+);
+
+std::vector<CandidatePattern> derive_relevant_action_patterns(
+  const TP_Domain &domain,
+  const TP_State &state
+);
+
+std::vector<CandidatePattern> derive_reachable_action_patterns(
+  const TP_Domain &domain,
+  const TP_State &state
+);
+
+ReducedTaskPatterns analyze_reduced_task_patterns(
+  const TP_Domain &domain,
+  const TP_State &state
 );
 
 int32_t score_candidate_relevance(
@@ -189,7 +224,7 @@ TP_State apply_action(
   const CandidateAction &action
 );
 
-std::vector<int32_t> make_state_signature(const TP_State &state);
+const std::vector<int32_t> &make_state_signature(const TP_State &state, bool *rebuilt = nullptr);
 
 TP_Status export_schema_tensors_impl(
   const TP_Domain &domain,

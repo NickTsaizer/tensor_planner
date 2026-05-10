@@ -1,6 +1,8 @@
 #include "planner_internal.hpp"
 
 #include <chrono>
+#include <cstdlib>
+#include <iostream>
 
 namespace {
 
@@ -14,6 +16,33 @@ constexpr std::size_t kHeuristicPrefilterKeep = 192;
 constexpr std::size_t kPreferredKeep = 96;
 constexpr std::size_t kModelKeep = 64;
 constexpr std::size_t kUncertainKeep = 16;
+
+bool signature_trace_enabled() {
+  static const bool enabled = [] {
+    const char *value = std::getenv("TP_TRACE_SIGNATURES");
+    return value != nullptr && value[0] != '\0' && value[0] != '0';
+  }();
+  return enabled;
+}
+
+void log_signature_metrics(
+  int32_t requests,
+  int32_t rebuilds,
+  int64_t time_us,
+  std::size_t visited_count
+) {
+  if (!signature_trace_enabled()) {
+    return;
+  }
+
+  std::cerr << "signature_metrics"
+            << " requests=" << requests
+            << " rebuilds=" << rebuilds
+            << " cache_hits=" << (requests - rebuilds)
+            << " time_us=" << time_us
+            << " visited=" << visited_count
+            << '\n';
+}
 
 float compute_priority(
   int32_t g_cost,
@@ -68,19 +97,40 @@ struct GuidedQueueCompare {
 
 template <typename Less>
 std::vector<std::size_t> select_top_indices(std::size_t count, std::size_t keep_count, Less less) {
-  std::vector<std::size_t> indices(count);
-  for (std::size_t index = 0; index < count; ++index) {
-    indices[index] = index;
+  std::vector<std::size_t> indices;
+  if (count == 0 || keep_count == 0) {
+    return indices;
   }
 
   if (keep_count >= count) {
+    indices.resize(count);
+    for (std::size_t index = 0; index < count; ++index) {
+      indices[index] = index;
+    }
     std::sort(indices.begin(), indices.end(), less);
     return indices;
   }
 
-  const auto keep_end = indices.begin() + static_cast<std::ptrdiff_t>(keep_count);
-  std::partial_sort(indices.begin(), keep_end, indices.end(), less);
-  indices.resize(keep_count);
+  const auto worse = [&less](std::size_t lhs, std::size_t rhs) {
+    return less(rhs, lhs);
+  };
+
+  indices.reserve(keep_count);
+  for (std::size_t index = 0; index < count; ++index) {
+    if (indices.size() < keep_count) {
+      indices.push_back(index);
+      std::push_heap(indices.begin(), indices.end(), worse);
+      continue;
+    }
+
+    if (less(index, indices.front())) {
+      std::pop_heap(indices.begin(), indices.end(), worse);
+      indices.back() = index;
+      std::push_heap(indices.begin(), indices.end(), worse);
+    }
+  }
+
+  std::sort(indices.begin(), indices.end(), less);
   return indices;
 }
 
@@ -160,7 +210,7 @@ void shortlist_guided_candidates(std::vector<GuidedCandidate> *candidates, int64
   }
 
   const auto sort_start = std::chrono::steady_clock::now();
-  const auto preferred_order = select_top_indices(candidates->size(), kPreferredKeep, [candidates](std::size_t lhs, std::size_t rhs) {
+  const auto preferred_less = [candidates](std::size_t lhs, std::size_t rhs) {
     const GuidedCandidate &left = (*candidates)[lhs];
     const GuidedCandidate &right = (*candidates)[rhs];
     if (left.heuristic_score != right.heuristic_score) {
@@ -173,9 +223,8 @@ void shortlist_guided_candidates(std::vector<GuidedCandidate> *candidates, int64
       return left.action.schema_id < right.action.schema_id;
     }
     return left.action.args < right.action.args;
-  });
-
-  const auto model_order = select_top_indices(candidates->size(), kModelKeep, [candidates](std::size_t lhs, std::size_t rhs) {
+  };
+  const auto model_less = [candidates](std::size_t lhs, std::size_t rhs) {
     const GuidedCandidate &left = (*candidates)[lhs];
     const GuidedCandidate &right = (*candidates)[rhs];
     if (left.model_score != right.model_score) {
@@ -188,9 +237,8 @@ void shortlist_guided_candidates(std::vector<GuidedCandidate> *candidates, int64
       return left.action.schema_id < right.action.schema_id;
     }
     return left.action.args < right.action.args;
-  });
-
-  const auto uncertainty_order = select_top_indices(candidates->size(), kUncertainKeep, [candidates](std::size_t lhs, std::size_t rhs) {
+  };
+  const auto uncertainty_less = [candidates](std::size_t lhs, std::size_t rhs) {
     const GuidedCandidate &left = (*candidates)[lhs];
     const GuidedCandidate &right = (*candidates)[rhs];
     const float left_uncertainty = std::abs(left.model_score);
@@ -205,40 +253,53 @@ void shortlist_guided_candidates(std::vector<GuidedCandidate> *candidates, int64
       return left.action.schema_id < right.action.schema_id;
     }
     return left.action.args < right.action.args;
-  });
+  };
+  const auto final_less = [candidates](std::size_t lhs, std::size_t rhs) {
+    const GuidedCandidate &left = (*candidates)[lhs];
+    const GuidedCandidate &right = (*candidates)[rhs];
+    if (left.model_score != right.model_score) {
+      return left.model_score > right.model_score;
+    }
+    if (left.heuristic_score != right.heuristic_score) {
+      return left.heuristic_score > right.heuristic_score;
+    }
+    if (left.action.schema_id != right.action.schema_id) {
+      return left.action.schema_id < right.action.schema_id;
+    }
+    return left.action.args < right.action.args;
+  };
 
-  std::vector<bool> keep(candidates->size(), false);
+  const auto preferred_order = select_top_indices(candidates->size(), kPreferredKeep, preferred_less);
+  const auto model_order = select_top_indices(candidates->size(), kModelKeep, model_less);
+  const auto uncertainty_order = select_top_indices(candidates->size(), kUncertainKeep, uncertainty_less);
+
+  std::vector<uint8_t> keep(candidates->size(), 0);
   for (const std::size_t index : preferred_order) {
-    keep[index] = true;
+    keep[index] = 1;
   }
   for (const std::size_t index : model_order) {
-    keep[index] = true;
+    keep[index] = 1;
   }
   for (const std::size_t index : uncertainty_order) {
-    keep[index] = true;
+    keep[index] = 1;
   }
 
-  std::vector<GuidedCandidate> shortlisted_candidates;
-  shortlisted_candidates.reserve(candidates->size());
+  std::vector<std::size_t> shortlisted_indices;
+  shortlisted_indices.reserve(preferred_order.size() + model_order.size() + uncertainty_order.size());
   for (std::size_t index = 0; index < candidates->size(); ++index) {
     if (keep[index]) {
-      shortlisted_candidates.push_back((*candidates)[index]);
+      shortlisted_indices.push_back(index);
     }
   }
 
-  if (!shortlisted_candidates.empty()) {
-    std::sort(shortlisted_candidates.begin(), shortlisted_candidates.end(), [](const GuidedCandidate &lhs, const GuidedCandidate &rhs) {
-      if (lhs.model_score != rhs.model_score) {
-        return lhs.model_score > rhs.model_score;
-      }
-      if (lhs.heuristic_score != rhs.heuristic_score) {
-        return lhs.heuristic_score > rhs.heuristic_score;
-      }
-      if (lhs.action.schema_id != rhs.action.schema_id) {
-        return lhs.action.schema_id < rhs.action.schema_id;
-      }
-      return lhs.action.args < rhs.action.args;
-    });
+  if (!shortlisted_indices.empty()) {
+    std::sort(shortlisted_indices.begin(), shortlisted_indices.end(), final_less);
+
+    std::vector<GuidedCandidate> shortlisted_candidates;
+    shortlisted_candidates.reserve(shortlisted_indices.size());
+    for (const std::size_t index : shortlisted_indices) {
+      shortlisted_candidates.push_back((*candidates)[index]);
+    }
     *candidates = std::move(shortlisted_candidates);
   }
   const auto sort_end = std::chrono::steady_clock::now();
@@ -264,35 +325,20 @@ void shortlist_heuristic_candidates(
     scored.push_back({candidate, score_candidate_relevance(domain, state, candidate)});
   }
 
-  const std::size_t keep_count = std::min(kPreferredKeep, scored.size());
-  const auto keep_end = scored.begin() + static_cast<std::ptrdiff_t>(keep_count);
-  if (keep_count < scored.size()) {
-    std::partial_sort(scored.begin(), keep_end, scored.end(), [](const RankedCandidate &lhs, const RankedCandidate &rhs) {
-      if (lhs.score != rhs.score) {
-        return lhs.score > rhs.score;
-      }
-      if (lhs.action.schema_id != rhs.action.schema_id) {
-        return lhs.action.schema_id < rhs.action.schema_id;
-      }
-      return lhs.action.args < rhs.action.args;
-    });
-    scored.resize(keep_count);
-  } else {
-    std::sort(scored.begin(), scored.end(), [](const RankedCandidate &lhs, const RankedCandidate &rhs) {
-      if (lhs.score != rhs.score) {
-        return lhs.score > rhs.score;
-      }
-      if (lhs.action.schema_id != rhs.action.schema_id) {
-        return lhs.action.schema_id < rhs.action.schema_id;
-      }
-      return lhs.action.args < rhs.action.args;
-    });
-  }
+  const auto top_indices = select_top_indices(scored.size(), kPreferredKeep, [&scored](std::size_t lhs, std::size_t rhs) {
+    if (scored[lhs].score != scored[rhs].score) {
+      return scored[lhs].score > scored[rhs].score;
+    }
+    if (scored[lhs].action.schema_id != scored[rhs].action.schema_id) {
+      return scored[lhs].action.schema_id < scored[rhs].action.schema_id;
+    }
+    return scored[lhs].action.args < scored[rhs].action.args;
+  });
 
   std::vector<CandidateAction> shortlisted_candidates;
-  shortlisted_candidates.reserve(scored.size());
-  for (const RankedCandidate &candidate : scored) {
-    shortlisted_candidates.push_back(candidate.action);
+  shortlisted_candidates.reserve(top_indices.size());
+  for (const std::size_t index : top_indices) {
+    shortlisted_candidates.push_back(scored[index].action);
   }
   *candidates = std::move(shortlisted_candidates);
 
@@ -321,20 +367,19 @@ void heuristic_prefilter_candidates(
     scored.push_back({candidate, score_candidate_relevance(domain, state, candidate)});
   }
 
-  const auto keep_end = scored.begin() + static_cast<std::ptrdiff_t>(kHeuristicPrefilterKeep);
-  std::partial_sort(scored.begin(), keep_end, scored.end(), [](const RankedCandidate &lhs, const RankedCandidate &rhs) {
-    if (lhs.score != rhs.score) {
-      return lhs.score > rhs.score;
+  const auto top_indices = select_top_indices(scored.size(), kHeuristicPrefilterKeep, [&scored](std::size_t lhs, std::size_t rhs) {
+    if (scored[lhs].score != scored[rhs].score) {
+      return scored[lhs].score > scored[rhs].score;
     }
-    if (lhs.action.schema_id != rhs.action.schema_id) {
-      return lhs.action.schema_id < rhs.action.schema_id;
+    if (scored[lhs].action.schema_id != scored[rhs].action.schema_id) {
+      return scored[lhs].action.schema_id < scored[rhs].action.schema_id;
     }
-    return lhs.action.args < rhs.action.args;
+    return scored[lhs].action.args < scored[rhs].action.args;
   });
 
   std::vector<CandidateAction> filtered;
-  filtered.reserve(kHeuristicPrefilterKeep);
-  for (std::size_t index = 0; index < kHeuristicPrefilterKeep; ++index) {
+  filtered.reserve(top_indices.size());
+  for (const std::size_t index : top_indices) {
     filtered.push_back(scored[index].action);
   }
   *candidates = std::move(filtered);
@@ -344,6 +389,7 @@ std::vector<CandidateAction> generate_guided_candidates_with_widening(
   const TP_Domain &domain,
   const TP_State &state,
   int32_t max_candidates,
+  const std::vector<CandidatePattern> *relevant_patterns,
   bool use_heuristic_prefilter,
   int32_t *candidate_generation_calls,
   int64_t *candidate_generation_time_us
@@ -353,7 +399,7 @@ std::vector<CandidateAction> generate_guided_candidates_with_widening(
   std::vector<CandidateAction> candidates;
   while (true) {
     const auto candidate_start = std::chrono::steady_clock::now();
-    candidates = generate_candidate_actions(domain, state, budget);
+    candidates = generate_candidate_actions(domain, state, budget, relevant_patterns);
     const auto candidate_end = std::chrono::steady_clock::now();
     *candidate_generation_time_us += std::chrono::duration_cast<std::chrono::microseconds>(
       candidate_end - candidate_start
@@ -393,8 +439,13 @@ TP_Status fill_solve_result(
   int64_t scorer_export_time_us,
   int64_t scorer_time_us,
   int64_t scorer_sort_time_us,
+  int32_t signature_requests,
+  int32_t signature_rebuilds,
+  int64_t signature_time_us,
+  std::size_t visited_count,
   TP_Solve_Result *out_result
 ) {
+  log_signature_metrics(signature_requests, signature_rebuilds, signature_time_us, visited_count);
   out_result->expansions = expansions;
   out_result->generated = generated;
   out_result->candidate_generation_calls = candidate_generation_calls;
@@ -443,6 +494,7 @@ TP_Status solve_guided_search(
   const TP_State &initial_state,
   TP_Solve_Result *out_result
 ) {
+  const ReducedTaskPatterns reduced_task_patterns = analyze_reduced_task_patterns(domain, initial_state);
   std::priority_queue<QueueEntry, std::vector<QueueEntry>, GuidedQueueCompare> open_set;
   std::unordered_set<std::vector<int32_t>, SignatureHash> visited;
   std::vector<SearchNode> nodes;
@@ -454,7 +506,6 @@ TP_Status solve_guided_search(
   root.priority = compute_priority(0, root.h_cost, false, 0.0f, 0.0f);
   nodes.push_back(root);
   open_set.push({0, root.priority, 0});
-  visited.insert(make_state_signature(root.state));
 
   int32_t expansions = 0;
   int32_t generated = 0;
@@ -465,7 +516,22 @@ TP_Status solve_guided_search(
   int64_t scorer_export_time_us = 0;
   int64_t scorer_time_us = 0;
   int64_t scorer_sort_time_us = 0;
+  int32_t signature_requests = 0;
+  int32_t signature_rebuilds = 0;
+  int64_t signature_time_us = 0;
   int32_t solved_index = -1;
+
+  bool root_signature_rebuilt = false;
+  const auto root_signature_start = std::chrono::steady_clock::now();
+  visited.insert(make_state_signature(root.state, &root_signature_rebuilt));
+  const auto root_signature_end = std::chrono::steady_clock::now();
+  ++signature_requests;
+  if (root_signature_rebuilt) {
+    ++signature_rebuilds;
+  }
+  signature_time_us += std::chrono::duration_cast<std::chrono::microseconds>(
+    root_signature_end - root_signature_start
+  ).count();
 
   while (!open_set.empty() && expansions < domain.limits.max_expansions) {
     const QueueEntry current_entry = open_set.top();
@@ -495,6 +561,7 @@ TP_Status solve_guided_search(
       domain,
       current.state,
       domain.limits.max_candidates,
+      reduced_task_patterns.filtered.empty() ? nullptr : &reduced_task_patterns.filtered,
       !solver_has_model_scorer(solver),
       &candidate_generation_calls,
       &candidate_generation_time_us
@@ -540,10 +607,21 @@ TP_Status solve_guided_search(
       const CandidateAction &candidate = candidates[candidate_index];
       const SearchNode &parent = nodes[static_cast<std::size_t>(current_node_index)];
       TP_State next_state = apply_action(domain, parent.state, candidate);
-      std::vector<int32_t> signature = make_state_signature(next_state);
+      bool signature_rebuilt = false;
+      const auto signature_start = std::chrono::steady_clock::now();
+      const std::vector<int32_t> &signature = make_state_signature(next_state, &signature_rebuilt);
+      const auto signature_end = std::chrono::steady_clock::now();
+      ++signature_requests;
+      if (signature_rebuilt) {
+        ++signature_rebuilds;
+      }
+      signature_time_us += std::chrono::duration_cast<std::chrono::microseconds>(
+        signature_end - signature_start
+      ).count();
       if (visited.find(signature) != visited.end()) {
         continue;
       }
+      visited.insert(signature);
 
       SearchNode child {};
       child.state = std::move(next_state);
@@ -564,7 +642,6 @@ TP_Status solve_guided_search(
       const int32_t child_index = static_cast<int32_t>(nodes.size());
       nodes.push_back(std::move(child));
       open_set.push({child_index, nodes.back().priority, nodes.back().g_cost});
-      visited.insert(std::move(signature));
 
       if (nodes.back().h_cost == 0) {
         solved_index = child_index;
@@ -589,6 +666,10 @@ TP_Status solve_guided_search(
     scorer_export_time_us,
     scorer_time_us,
     scorer_sort_time_us,
+    signature_requests,
+    signature_rebuilds,
+    signature_time_us,
+    visited.size(),
     out_result
   );
 }

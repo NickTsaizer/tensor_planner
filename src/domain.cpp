@@ -297,6 +297,11 @@ TP_Status export_schema_tensors_impl(
     return TP_STATUS_LIMIT_EXCEEDED;
   }
 
+  std::fill_n(out_tensors->pre_slot, out_tensors->pre_slot_count, static_cast<int8_t>(-1));
+  std::fill_n(out_tensors->eff_slot, out_tensors->eff_slot_count, static_cast<int8_t>(-1));
+  std::fill_n(out_tensors->num_pre_slot, out_tensors->num_pre_slot_count, static_cast<int8_t>(-1));
+  std::fill_n(out_tensors->num_eff_slot, out_tensors->num_eff_slot_count, static_cast<int8_t>(-1));
+
   for (int32_t predicate_index = 0; predicate_index < predicate_count; ++predicate_index) {
     const PredicateDef &predicate = domain.predicates[static_cast<std::size_t>(predicate_index)];
     out_tensors->pred_arity[predicate_index] = predicate.arity;

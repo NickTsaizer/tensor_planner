@@ -1,0 +1,329 @@
+#include "../include/tensor_planner.hpp"
+
+#include <algorithm>
+#include <array>
+#include <chrono>
+#include <cstdint>
+#include <cstdlib>
+#include <iostream>
+#include <string>
+#include <vector>
+
+namespace {
+
+struct Agent {
+  std::string name;
+};
+
+struct Item {
+  std::string name;
+};
+
+struct Location {
+  std::string name;
+};
+
+struct CraftingDomain {
+  tp::Predicate at;
+  tp::Predicate has;
+  tp::Predicate missing;
+  tp::Predicate connected;
+  tp::Predicate gather_at;
+  tp::Predicate home;
+  tp::Predicate requires_tool;
+  tp::Predicate gather_bare_hands;
+  tp::Predicate recipe2_a;
+  tp::Predicate recipe2_b;
+  tp::Predicate recipe3_a;
+  tp::Predicate recipe3_b;
+  tp::Predicate recipe3_c;
+
+  tp::Action move;
+  tp::Action gather_free;
+  tp::Action gather_tool;
+  tp::Action craft2;
+  tp::Action craft3;
+};
+
+struct CraftingObjects {
+  Agent agent{"agent"};
+  Location home{"home"};
+  Location forest{"forest"};
+  Location river{"river"};
+  Location cave{"cave"};
+  Location deep_cave{"deep_cave"};
+
+  Item flint{"flint"};
+  Item fiber{"fiber"};
+  Item wood{"wood"};
+  Item stone{"stone"};
+  Item iron_ore{"iron_ore"};
+  Item diamond{"diamond"};
+  std::vector<Item> distractions;
+  Item flint_axe{"flint_axe"};
+  Item stick{"stick"};
+  Item stone_pickaxe{"stone_pickaxe"};
+  Item iron_pickaxe{"iron_pickaxe"};
+  Item diamond_pickaxe{"diamond_pickaxe"};
+
+  explicit CraftingObjects(int32_t distraction_recipe_count) {
+    distractions.reserve(static_cast<std::size_t>(distraction_recipe_count));
+    for (int32_t index = 0; index < distraction_recipe_count; ++index) {
+      distractions.push_back(Item{"distraction_recipe_" + std::to_string(index)});
+    }
+  }
+};
+
+struct RunSummary {
+  TP_Status status = TP_STATUS_UNSUPPORTED;
+  bool solved = false;
+  int32_t expansions = 0;
+  int32_t generated = 0;
+  int32_t scorer_calls = 0;
+  std::size_t plan_length = 0;
+  int64_t wall_time_us = 0;
+};
+
+CraftingDomain build_domain(tp::Planner &planner) {
+  CraftingDomain domain {
+    .at = planner.predicate<Agent, Location>("at"),
+    .has = planner.predicate<Item>("has"),
+    .missing = planner.predicate<Item>("missing"),
+    .connected = planner.predicate<Location, Location>("connected"),
+    .gather_at = planner.predicate<Item, Location>("gather_at"),
+    .home = planner.predicate<Location>("home"),
+    .requires_tool = planner.predicate<Item, Item>("requires_tool"),
+    .gather_bare_hands = planner.predicate<Item>("gather_bare_hands"),
+    .recipe2_a = planner.predicate<Item, Item>("recipe2_a"),
+    .recipe2_b = planner.predicate<Item, Item>("recipe2_b"),
+    .recipe3_a = planner.predicate<Item, Item>("recipe3_a"),
+    .recipe3_b = planner.predicate<Item, Item>("recipe3_b"),
+    .recipe3_c = planner.predicate<Item, Item>("recipe3_c"),
+  };
+
+  domain.move = planner.action("move")
+    .param<Agent>("agent")
+    .param<Location>("from")
+    .param<Location>("to")
+    .require(domain.at("agent", "from"))
+    .require(domain.connected("from", "to"))
+    .removes(domain.at("agent", "from"))
+    .adds(domain.at("agent", "to"))
+    .commit();
+
+  domain.gather_free = planner.action("gather_free")
+    .param<Agent>("agent")
+    .param<Item>("item")
+    .param<Location>("where")
+    .require(domain.at("agent", "where"))
+    .require(domain.gather_at("item", "where"))
+    .require(domain.gather_bare_hands("item"))
+    .require(domain.missing("item"))
+    .removes(domain.missing("item"))
+    .adds(domain.has("item"))
+    .commit();
+
+  domain.gather_tool = planner.action("gather_tool")
+    .param<Agent>("agent")
+    .param<Item>("item")
+    .param<Location>("where")
+    .param<Item>("tool")
+    .require(domain.at("agent", "where"))
+    .require(domain.gather_at("item", "where"))
+    .require(domain.requires_tool("item", "tool"))
+    .require(domain.has("tool"))
+    .require(domain.missing("item"))
+    .removes(domain.missing("item"))
+    .adds(domain.has("item"))
+    .commit();
+
+  domain.craft2 = planner.action("craft2")
+    .param<Agent>("agent")
+    .param<Item>("item")
+    .param<Location>("where")
+    .param<Item>("first")
+    .param<Item>("second")
+    .require(domain.at("agent", "where"))
+    .require(domain.home("where"))
+    .require(domain.recipe2_a("item", "first"))
+    .require(domain.recipe2_b("item", "second"))
+    .require(domain.has("first"))
+    .require(domain.has("second"))
+    .require(domain.missing("item"))
+    .removes(domain.missing("item"))
+    .adds(domain.has("item"))
+    .commit();
+
+  domain.craft3 = planner.action("craft3")
+    .param<Agent>("agent")
+    .param<Item>("item")
+    .param<Location>("where")
+    .param<Item>("first")
+    .param<Item>("second")
+    .param<Item>("third")
+    .require(domain.at("agent", "where"))
+    .require(domain.home("where"))
+    .require(domain.recipe3_a("item", "first"))
+    .require(domain.recipe3_b("item", "second"))
+    .require(domain.recipe3_c("item", "third"))
+    .require(domain.has("first"))
+    .require(domain.has("second"))
+    .require(domain.has("third"))
+    .require(domain.missing("item"))
+    .removes(domain.missing("item"))
+    .adds(domain.has("item"))
+    .commit();
+
+  return domain;
+}
+
+void add_edge(tp::StateBuilder &state, const CraftingDomain &domain, Location &a, Location &b) {
+  state.fact(domain.connected(a, b));
+  state.fact(domain.connected(b, a));
+}
+
+void add_missing_item(tp::StateBuilder &state, const CraftingDomain &domain, Item &item) {
+  state.object(item);
+  state.fact(domain.missing(item));
+}
+
+tp::StateBuilder build_state(tp::Planner &planner, const CraftingDomain &domain, CraftingObjects &objects) {
+  auto state = planner.state()
+    .object(objects.agent)
+    .object(objects.home)
+    .object(objects.forest)
+    .object(objects.river)
+    .object(objects.cave)
+    .object(objects.deep_cave)
+    .fact(domain.at(objects.agent, objects.home))
+    .fact(domain.home(objects.home));
+
+  add_missing_item(state, domain, objects.flint);
+  add_missing_item(state, domain, objects.fiber);
+  add_missing_item(state, domain, objects.wood);
+  add_missing_item(state, domain, objects.stone);
+  add_missing_item(state, domain, objects.iron_ore);
+  add_missing_item(state, domain, objects.diamond);
+  for (Item &distraction : objects.distractions) {
+    add_missing_item(state, domain, distraction);
+  }
+  add_missing_item(state, domain, objects.flint_axe);
+  add_missing_item(state, domain, objects.stick);
+  add_missing_item(state, domain, objects.stone_pickaxe);
+  add_missing_item(state, domain, objects.iron_pickaxe);
+  add_missing_item(state, domain, objects.diamond_pickaxe);
+
+  add_edge(state, domain, objects.home, objects.forest);
+  add_edge(state, domain, objects.forest, objects.river);
+  add_edge(state, domain, objects.forest, objects.cave);
+  add_edge(state, domain, objects.cave, objects.deep_cave);
+
+  state
+    .fact(domain.gather_at(objects.flint, objects.river))
+    .fact(domain.gather_at(objects.fiber, objects.forest))
+    .fact(domain.gather_at(objects.wood, objects.forest))
+    .fact(domain.gather_at(objects.stone, objects.cave))
+    .fact(domain.gather_at(objects.iron_ore, objects.cave))
+    .fact(domain.gather_at(objects.diamond, objects.deep_cave))
+    .fact(domain.gather_bare_hands(objects.flint))
+    .fact(domain.gather_bare_hands(objects.fiber))
+    .fact(domain.requires_tool(objects.wood, objects.flint_axe))
+    .fact(domain.requires_tool(objects.stone, objects.flint_axe))
+    .fact(domain.requires_tool(objects.iron_ore, objects.stone_pickaxe))
+    .fact(domain.requires_tool(objects.diamond, objects.iron_pickaxe));
+
+  for (Item &distraction : objects.distractions) {
+    state
+      .fact(domain.recipe2_a(distraction, objects.flint))
+      .fact(domain.recipe2_b(distraction, objects.fiber));
+  }
+
+  state
+    .fact(domain.recipe2_a(objects.flint_axe, objects.flint))
+    .fact(domain.recipe2_b(objects.flint_axe, objects.fiber))
+    .fact(domain.recipe2_a(objects.stick, objects.wood))
+    .fact(domain.recipe2_b(objects.stick, objects.fiber))
+    .fact(domain.recipe2_a(objects.stone_pickaxe, objects.stone))
+    .fact(domain.recipe2_b(objects.stone_pickaxe, objects.stick))
+    .fact(domain.recipe2_a(objects.iron_pickaxe, objects.iron_ore))
+    .fact(domain.recipe2_b(objects.iron_pickaxe, objects.stick))
+    .fact(domain.recipe3_a(objects.diamond_pickaxe, objects.diamond))
+    .fact(domain.recipe3_b(objects.diamond_pickaxe, objects.stick))
+    .fact(domain.recipe3_c(objects.diamond_pickaxe, objects.iron_pickaxe))
+    .goal(domain.has(objects.diamond_pickaxe));
+
+  return state;
+}
+
+RunSummary solve_crafting_case(int32_t distraction_recipe_count) {
+  const int32_t max_objects = std::max(64, distraction_recipe_count + 32);
+  const int32_t max_facts = std::max(512, distraction_recipe_count * 8 + 512);
+  const int32_t max_candidates = std::max(512, distraction_recipe_count * 16 + 1024);
+
+  tp::Planner planner(tp::Limits{
+    .max_objects = max_objects,
+    .max_facts = max_facts,
+    .max_goals = 8,
+    .max_candidates = max_candidates,
+    .max_expansions = 100000,
+    .max_plan_length = 80,
+  });
+
+  CraftingObjects objects(distraction_recipe_count);
+  const CraftingDomain domain = build_domain(planner);
+  const tp::StateBuilder state = build_state(planner, domain, objects);
+
+  const auto solve_start = std::chrono::steady_clock::now();
+  const tp::SolveResult result = planner.solve(state);
+  const auto solve_end = std::chrono::steady_clock::now();
+
+  return RunSummary{
+    .status = result.status(),
+    .solved = result.solved(),
+    .expansions = result.expansions(),
+    .generated = result.generated(),
+    .scorer_calls = result.scorer_calls(),
+    .plan_length = result.steps().size(),
+    .wall_time_us = std::chrono::duration_cast<std::chrono::microseconds>(solve_end - solve_start).count(),
+  };
+}
+
+void print_summary(int32_t distraction_count, const RunSummary &summary) {
+  std::cout << "planner=tensor_planner_pddl"
+            << " distractions=" << distraction_count
+            << " solved=" << (summary.solved ? "yes" : "no")
+            << " status=" << summary.status
+            << " expansions=" << summary.expansions
+            << " generated=" << summary.generated
+            << " scorer_calls=" << summary.scorer_calls
+            << " plan_length=" << summary.plan_length
+            << " wall_us=" << summary.wall_time_us
+            << '\n';
+}
+
+std::vector<int32_t> parse_distraction_counts(int argc, char **argv) {
+  if (argc <= 1) {
+    return {0, 15, 30, 256, 1024, 2560};
+  }
+
+  std::vector<int32_t> counts;
+  counts.reserve(static_cast<std::size_t>(argc - 1));
+  for (int index = 1; index < argc; ++index) {
+    counts.push_back(std::stoi(argv[index]));
+  }
+  return counts;
+}
+
+}  // namespace
+
+int main(int argc, char **argv) {
+  const std::vector<int32_t> distraction_counts = parse_distraction_counts(argc, argv);
+  for (const int32_t distraction_count : distraction_counts) {
+    const RunSummary summary = solve_crafting_case(distraction_count);
+    print_summary(distraction_count, summary);
+    if (summary.status != TP_STATUS_OK || !summary.solved) {
+      return 1;
+    }
+  }
+  return 0;
+}

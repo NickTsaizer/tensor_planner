@@ -815,9 +815,10 @@ inline TP_Action_Literal ActionBuilder::make_literal(const Atom &atom, int8_t si
   if (atom.args.size() > TP_MAX_ARITY) {
     throw Error("precondition arity exceeds TP_MAX_ARITY: " + atom.predicate_name);
   }
-  TP_Action_Literal literal {.predicate_id = atom.predicate_id, .sign = sign, .arity = 0, .slots = {0, 0, 0, 0}};
-  literal.arity = static_cast<uint8_t>(atom.args.size());
-  for (std::size_t index = 0; index < atom.args.size(); ++index) {
+  const std::size_t arg_count = atom.args.size();
+  TP_Action_Literal literal {.predicate_id = atom.predicate_id, .sign = sign, .arity = 0, .slots = {-1, -1, -1, -1}};
+  literal.arity = static_cast<uint8_t>(arg_count);
+  for (std::size_t index = 0; index < TP_MAX_ARITY && index < arg_count; ++index) {
     literal.slots[index] = resolve_slot(atom.args[index], atom.predicate_name);
     const std::string &param_name = atom.args[index].parameter_name;
     const auto type_found = slot_cpp_types_.find(param_name);
@@ -832,9 +833,10 @@ inline TP_Action_Effect ActionBuilder::make_effect(const Atom &atom, uint8_t op)
   if (atom.args.size() > TP_MAX_ARITY) {
     throw Error("effect arity exceeds TP_MAX_ARITY: " + atom.predicate_name);
   }
-  TP_Action_Effect effect {.predicate_id = atom.predicate_id, .op = op, .arity = 0, .slots = {0, 0, 0, 0}};
-  effect.arity = static_cast<uint8_t>(atom.args.size());
-  for (std::size_t index = 0; index < atom.args.size(); ++index) {
+  const std::size_t arg_count = atom.args.size();
+  TP_Action_Effect effect {.predicate_id = atom.predicate_id, .op = op, .arity = 0, .slots = {-1, -1, -1, -1}};
+  effect.arity = static_cast<uint8_t>(arg_count);
+  for (std::size_t index = 0; index < TP_MAX_ARITY && index < arg_count; ++index) {
     effect.slots[index] = resolve_slot(atom.args[index], atom.predicate_name);
     const std::string &param_name = atom.args[index].parameter_name;
     const auto type_found = slot_cpp_types_.find(param_name);
@@ -847,15 +849,16 @@ inline TP_Action_Effect ActionBuilder::make_effect(const Atom &atom, uint8_t op)
 
 inline TP_Numeric_Precondition ActionBuilder::make_numeric_precondition(const NumericPrecondition &condition) const {
   validate_numeric_slots(condition.term);
-  TP_Numeric_Precondition result {
-    .function_id = condition.term.function_id,
-    .cmp_op = static_cast<uint8_t>(condition.op),
-    .arity = 0,
-    .slots = {0, 0, 0, 0},
-    .rhs_value = condition.value,
-  };
-  result.arity = static_cast<uint8_t>(condition.term.args.size());
-  for (std::size_t index = 0; index < condition.term.args.size(); ++index) {
+  const std::size_t arg_count = condition.term.args.size();
+  TP_Numeric_Precondition result {};
+  result.function_id = condition.term.function_id;
+  result.cmp_op = static_cast<uint8_t>(condition.op);
+  result.arity = static_cast<uint8_t>(arg_count);
+  result.rhs_value = condition.value;
+  for (int8_t &slot : result.slots) {
+    slot = -1;
+  }
+  for (std::size_t index = 0; index < TP_MAX_ARITY && index < arg_count; ++index) {
     result.slots[index] = resolve_slot(condition.term.args[index], condition.term.function_name);
   }
   return result;
@@ -863,15 +866,16 @@ inline TP_Numeric_Precondition ActionBuilder::make_numeric_precondition(const Nu
 
 inline TP_Numeric_Effect ActionBuilder::make_numeric_effect(const NumericEffect &effect) const {
   validate_numeric_slots(effect.term);
-  TP_Numeric_Effect result {
-    .function_id = effect.term.function_id,
-    .op = static_cast<uint8_t>(effect.op),
-    .arity = 0,
-    .slots = {0, 0, 0, 0},
-    .rhs_value = effect.value,
-  };
-  result.arity = static_cast<uint8_t>(effect.term.args.size());
-  for (std::size_t index = 0; index < effect.term.args.size(); ++index) {
+  const std::size_t arg_count = effect.term.args.size();
+  TP_Numeric_Effect result {};
+  result.function_id = effect.term.function_id;
+  result.op = static_cast<uint8_t>(effect.op);
+  result.arity = static_cast<uint8_t>(arg_count);
+  result.rhs_value = effect.value;
+  for (int8_t &slot : result.slots) {
+    slot = -1;
+  }
+  for (std::size_t index = 0; index < TP_MAX_ARITY && index < arg_count; ++index) {
     result.slots[index] = resolve_slot(effect.term.args[index], effect.term.function_name);
   }
   return result;
